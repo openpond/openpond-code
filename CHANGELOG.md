@@ -1,5 +1,11 @@
 # openpond-code
 
+## 0.1.2
+
+### Patch Changes
+
+- 176a699: updated endpoints
+
 ## 0.1.1
 
 ### Patch Changes
