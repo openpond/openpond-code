@@ -1,0 +1,59 @@
+{
+  "name": "openpond-code",
+  "version": "0.1.0",
+  "description": "OpenPond CLI (API key only)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "bin": {
+    "openpond-code": "dist/cli.js",
+    "openpond": "dist/cli.js",
+    "op": "dist/cli.js"
+  },
+  "scripts": {
+    "dev": "bun run src/index.tsx",
+    "cli": "bun run src/cli-package.ts",
+    "cli:package": "bun run src/cli-package.ts",
+    "build:cli": "bun build ./src/cli-package.ts --outfile=dist/cli.js --target=node --banner:js='#!/usr/bin/env node'",
+    "build:package": "bun build src/index.ts --outfile dist/index.js --target node",
+    "build:types": "tsc --project tsconfig.package.json",
+    "lint": "npm run typecheck",
+    "typecheck": "npm run build:types",
+    "test": "node -e \"console.log('No automated tests configured')\"",
+    "build": "npm run build:cli && npm run build:package && npm run build:types",
+    "prepublishOnly": "npm run build",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "changeset:publish": "changeset publish",
+    "release": "npm run build && npm run changeset:publish"
+  },
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "CHANGELOG.md",
+    "RELEASE.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "dependencies": {
+    "@opentui/core": "^0.1.62",
+    "@opentui/react": "^0.1.62",
+    "react": "^19.2.3",
+    "typescript": "^5.6.3",
+    "typescript-language-server": "^4.3.3"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.29.5",
+    "@types/node": "^20.19.24"
+  }
+}

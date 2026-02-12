@@ -1,0 +1,78 @@
+{
+  "gateway": {
+    "baseUrl": "https://gateway.openpond.dev",
+    "bars": [
+      { "label": "btc-1m-rsi", "symbol": "BTC", "resolution": "1", "countBack": 240, "minItems": 15 },
+      { "label": "btc-1m-macd", "symbol": "BTC", "resolution": "1", "countBack": 240, "minItems": 34 },
+      { "label": "btc-1m-bb", "symbol": "BTC", "resolution": "1", "countBack": 240, "minItems": 20 },
+      { "label": "btc-1m-price-change", "symbol": "BTC", "resolution": "1", "countBack": 240, "minItems": 25 },
+      { "label": "btc-1m-sma", "symbol": "BTC", "resolution": "1", "countBack": 240, "minItems": 201 },
+      { "label": "btc-1m-ema", "symbol": "BTC", "resolution": "1", "countBack": 240, "minItems": 201 },
+      { "label": "btc-1m-ma-cross", "symbol": "BTC", "resolution": "1", "countBack": 240, "minItems": 201 },
+      { "label": "btc-1m-atr", "symbol": "BTC", "resolution": "1", "countBack": 240, "minItems": 15 },
+
+      { "label": "btc-5m-rsi", "symbol": "BTC", "resolution": "5", "countBack": 240, "minItems": 15 },
+      { "label": "btc-5m-macd", "symbol": "BTC", "resolution": "5", "countBack": 240, "minItems": 34 },
+      { "label": "btc-5m-bb", "symbol": "BTC", "resolution": "5", "countBack": 240, "minItems": 20 },
+      { "label": "btc-5m-price-change", "symbol": "BTC", "resolution": "5", "countBack": 240, "minItems": 25 },
+      { "label": "btc-5m-sma", "symbol": "BTC", "resolution": "5", "countBack": 240, "minItems": 201 },
+      { "label": "btc-5m-ema", "symbol": "BTC", "resolution": "5", "countBack": 240, "minItems": 201 },
+      { "label": "btc-5m-ma-cross", "symbol": "BTC", "resolution": "5", "countBack": 240, "minItems": 201 },
+      { "label": "btc-5m-atr", "symbol": "BTC", "resolution": "5", "countBack": 240, "minItems": 15 },
+
+      { "label": "btc-15m-rsi", "symbol": "BTC", "resolution": "15", "countBack": 240, "minItems": 15 },
+      { "label": "btc-15m-macd", "symbol": "BTC", "resolution": "15", "countBack": 240, "minItems": 34 },
+      { "label": "btc-15m-bb", "symbol": "BTC", "resolution": "15", "countBack": 240, "minItems": 20 },
+      { "label": "btc-15m-price-change", "symbol": "BTC", "resolution": "15", "countBack": 240, "minItems": 25 },
+      { "label": "btc-15m-sma", "symbol": "BTC", "resolution": "15", "countBack": 240, "minItems": 201 },
+      { "label": "btc-15m-ema", "symbol": "BTC", "resolution": "15", "countBack": 240, "minItems": 201 },
+      { "label": "btc-15m-ma-cross", "symbol": "BTC", "resolution": "15", "countBack": 240, "minItems": 201 },
+      { "label": "btc-15m-atr", "symbol": "BTC", "resolution": "15", "countBack": 240, "minItems": 15 },
+
+      { "label": "btc-30m-rsi", "symbol": "BTC", "resolution": "30", "countBack": 240, "minItems": 15 },
+      { "label": "btc-30m-macd", "symbol": "BTC", "resolution": "30", "countBack": 240, "minItems": 34 },
+      { "label": "btc-30m-bb", "symbol": "BTC", "resolution": "30", "countBack": 240, "minItems": 20 },
+      { "label": "btc-30m-price-change", "symbol": "BTC", "resolution": "30", "countBack": 240, "minItems": 25 },
+      { "label": "btc-30m-sma", "symbol": "BTC", "resolution": "30", "countBack": 240, "minItems": 201 },
+      { "label": "btc-30m-ema", "symbol": "BTC", "resolution": "30", "countBack": 240, "minItems": 201 },
+      { "label": "btc-30m-ma-cross", "symbol": "BTC", "resolution": "30", "countBack": 240, "minItems": 201 },
+      { "label": "btc-30m-atr", "symbol": "BTC", "resolution": "30", "countBack": 240, "minItems": 15 },
+
+      { "label": "btc-1h-rsi", "symbol": "BTC", "resolution": "60", "countBack": 240, "minItems": 15 },
+      { "label": "btc-1h-macd", "symbol": "BTC", "resolution": "60", "countBack": 240, "minItems": 34 },
+      { "label": "btc-1h-bb", "symbol": "BTC", "resolution": "60", "countBack": 240, "minItems": 20 },
+      { "label": "btc-1h-price-change", "symbol": "BTC", "resolution": "60", "countBack": 240, "minItems": 25 },
+      { "label": "btc-1h-sma", "symbol": "BTC", "resolution": "60", "countBack": 240, "minItems": 201 },
+      { "label": "btc-1h-ema", "symbol": "BTC", "resolution": "60", "countBack": 240, "minItems": 201 },
+      { "label": "btc-1h-ma-cross", "symbol": "BTC", "resolution": "60", "countBack": 240, "minItems": 201 },
+      { "label": "btc-1h-atr", "symbol": "BTC", "resolution": "60", "countBack": 240, "minItems": 15 },
+
+      { "label": "btc-4h-rsi", "symbol": "BTC", "resolution": "240", "countBack": 240, "minItems": 15 },
+      { "label": "btc-4h-macd", "symbol": "BTC", "resolution": "240", "countBack": 240, "minItems": 34 },
+      { "label": "btc-4h-bb", "symbol": "BTC", "resolution": "240", "countBack": 240, "minItems": 20 },
+      { "label": "btc-4h-price-change", "symbol": "BTC", "resolution": "240", "countBack": 240, "minItems": 25 },
+      { "label": "btc-4h-sma", "symbol": "BTC", "resolution": "240", "countBack": 240, "minItems": 201 },
+      { "label": "btc-4h-ema", "symbol": "BTC", "resolution": "240", "countBack": 240, "minItems": 201 },
+      { "label": "btc-4h-ma-cross", "symbol": "BTC", "resolution": "240", "countBack": 240, "minItems": 201 },
+      { "label": "btc-4h-atr", "symbol": "BTC", "resolution": "240", "countBack": 240, "minItems": 15 },
+
+      { "label": "btc-1d-rsi", "symbol": "BTC", "resolution": "1D", "countBack": 240, "minItems": 15 },
+      { "label": "btc-1d-macd", "symbol": "BTC", "resolution": "1D", "countBack": 240, "minItems": 34 },
+      { "label": "btc-1d-bb", "symbol": "BTC", "resolution": "1D", "countBack": 240, "minItems": 20 },
+      { "label": "btc-1d-price-change", "symbol": "BTC", "resolution": "1D", "countBack": 240, "minItems": 25 },
+      { "label": "btc-1d-sma", "symbol": "BTC", "resolution": "1D", "countBack": 240, "minItems": 201 },
+      { "label": "btc-1d-ema", "symbol": "BTC", "resolution": "1D", "countBack": 240, "minItems": 201 },
+      { "label": "btc-1d-ma-cross", "symbol": "BTC", "resolution": "1D", "countBack": 240, "minItems": 201 },
+      { "label": "btc-1d-atr", "symbol": "BTC", "resolution": "1D", "countBack": 240, "minItems": 15 },
+
+      { "label": "btc-1w-rsi", "symbol": "BTC", "resolution": "1W", "countBack": 240, "minItems": 15 },
+      { "label": "btc-1w-macd", "symbol": "BTC", "resolution": "1W", "countBack": 240, "minItems": 34 },
+      { "label": "btc-1w-bb", "symbol": "BTC", "resolution": "1W", "countBack": 240, "minItems": 20 },
+      { "label": "btc-1w-price-change", "symbol": "BTC", "resolution": "1W", "countBack": 240, "minItems": 25 },
+      { "label": "btc-1w-sma", "symbol": "BTC", "resolution": "1W", "countBack": 240, "minItems": 201 },
+      { "label": "btc-1w-ema", "symbol": "BTC", "resolution": "1W", "countBack": 240, "minItems": 201 },
+      { "label": "btc-1w-ma-cross", "symbol": "BTC", "resolution": "1W", "countBack": 240, "minItems": 201 },
+      { "label": "btc-1w-atr", "symbol": "BTC", "resolution": "1W", "countBack": 240, "minItems": 15 }
+    ]
+  }
+}

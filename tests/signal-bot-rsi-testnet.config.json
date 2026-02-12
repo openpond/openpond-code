@@ -1,0 +1,15 @@
+{
+  "hyperliquid": {
+    "baseUrl": "https://api.hyperliquid-testnet.xyz",
+    "walletAddress": "0x69cc68669d2c91FFc9FaB84C1F845d85E0D36F95"
+  },
+  "postRunDelayMs": 5000,
+  "bots": [
+    {
+      "id": "signal-bot-rsi",
+      "handleRepo": "0xglu/signal-bot-rsi",
+      "toolName": "signal-bot",
+      "expectPositionChange": "none"
+    }
+  ]
+}
