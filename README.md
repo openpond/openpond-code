@@ -119,18 +119,3 @@ bun run dev
 Cache:
 
 - `~/.openpond/cache.json` caches app/tool lists for 1 hour and refreshes automatically on next use.
-
-## Strategy tests (signal bot)
-
-Gateway pricing checks + price bot smoke tests (uses `openpond` CLI for tool runs):
-
-```bash
-OPENPOND_GATEWAY_URL=https://gateway.openpond.dev bun run tests/gateway.ts
-bash tests/gateway.sh
-OPENPOND_GATEWAY_URL=https://gateway.openpond.dev OPENPOND_API_KEY=opk_... OPENPOND_BASE_URL=https://openpond.ai OPENPOND_API_URL=https://api.openpond.ai OPENPOND_TOOL_URL=https://apps.openpond.ai bun run tests/signal-bot-price-bots.ts
-bash tests/signal-bot-price-bots.sh
-```
-
-Config lives in `openpond-code/tests/gateway.config.json` (gateway checks) and
-`openpond-code/tests/signal-bot-price-bots.config.json` (bots + positions). Position checks use
-`OPENPOND_HYPERLIQUID_BASE_URL` + `OPENPOND_HL_WALLET_ADDRESS` (or `HYPERLIQUID_BASE_URL` + `HL_WALLET_ADDRESS`).

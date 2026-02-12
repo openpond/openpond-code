@@ -24,4 +24,4 @@ Use this root skill as the default entrypoint when importing this repository int
 - Repo create/push workflows (`openpond repo create`, `openpond repo push`)
 - Deployment watch workflows (`openpond deploy watch`)
 - Tool discovery and execution (`openpond tool list`, `openpond tool run`)
-- Daily Snapshot and template verification loop
+- CLI-driven deploy and tool validation loop
