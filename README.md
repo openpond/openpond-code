@@ -102,7 +102,7 @@ await client.apps.agentCreate(
 You can override hosts with `baseUrl`, `apiUrl`, and `toolUrl` in `createClient`, or
 via `OPENPOND_BASE_URL`, `OPENPOND_API_URL`, and `OPENPOND_TOOL_URL`.
 
-Examples live in `openpond-code/examples`.
+Examples live in `examples`.
 
 ## Local TUI
 
