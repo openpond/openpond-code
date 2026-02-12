@@ -7,6 +7,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 
 import {
+  getAppRuntimeSummary,
   executeHostedTool,
   getDeploymentDetail,
   getDeploymentLogs,
@@ -25,6 +26,7 @@ import {
   getAppEnvironment,
   updateAppEnvironment,
   executeUserTool,
+  runAssistantMode,
   submitPositionsTx,
   type AppListItem,
 } from "./api";
@@ -496,13 +498,15 @@ function printHelp(): void {
   console.log("  openpond apps env get <handle>/<repo>");
   console.log("  openpond apps env set <handle>/<repo> --env <json>");
   console.log("  openpond apps performance [--app-id <id>]");
+  console.log("  openpond apps summary <handle>/<repo>");
+  console.log("  openpond apps assistant <plan|performance> <handle>/<repo> --prompt <text>");
   console.log(
     "  openpond apps store events [--source <source>] [--status <csv>] [--symbol <symbol>] [--wallet-address <0x...>] [--since <ms|iso>] [--until <ms|iso>] [--limit <n>] [--cursor <cursor>] [--history <true|false>] [--params <json>]"
   );
   console.log("  openpond apps trade-facts [--app-id <id>]");
   console.log("  openpond apps agent create --prompt <text> [--template-id <id>]");
   console.log(
-    "  openpond apps tools execute <appId> <deploymentId> <tool> [--body <json>] [--method <METHOD>] [--headers <json>]"
+    "  openpond apps tools execute <appId> <deploymentId> <tool> [--body <json>] [--method <METHOD>] [--headers <json>] [--summary <true|false>]"
   );
   console.log(
     "  openpond apps positions tx [--method <GET|POST>] [--body <json>] [--params <json>]"
@@ -1003,6 +1007,45 @@ async function runAppsPerformance(options: Record<string, string | boolean>): Pr
   console.log(JSON.stringify(performance, null, 2));
 }
 
+async function runAppsSummary(
+  _options: Record<string, string | boolean>,
+  target: string
+): Promise<void> {
+  const config = await loadConfig();
+  const uiBase = resolveBaseUrl(config);
+  const apiBase = resolvePublicApiBaseUrl();
+  const apiKey = await ensureApiKey(config, uiBase);
+  const { app } = await resolveAppTarget(apiBase, apiKey, target);
+  const summary = await getAppRuntimeSummary(apiBase, apiKey, app.id);
+  console.log(JSON.stringify(summary, null, 2));
+}
+
+async function runAppsAssistant(
+  options: Record<string, string | boolean>,
+  mode: "plan" | "performance",
+  target: string,
+  contentParts: string[]
+): Promise<void> {
+  const prompt =
+    (typeof options.prompt === "string" ? options.prompt : null) ||
+    contentParts.join(" ");
+  if (!prompt.trim()) {
+    throw new Error("usage: apps assistant <plan|performance> <handle>/<repo> --prompt <text>");
+  }
+
+  const config = await loadConfig();
+  const uiBase = resolveBaseUrl(config);
+  const apiBase = resolvePublicApiBaseUrl();
+  const apiKey = await ensureApiKey(config, uiBase);
+  const { app } = await resolveAppTarget(apiBase, apiKey, target);
+  const result = await runAssistantMode(apiBase, apiKey, {
+    appId: app.id,
+    mode,
+    prompt: prompt.trim(),
+  });
+  console.log(JSON.stringify(result, null, 2));
+}
+
 async function runAppsAgentCreate(
   options: Record<string, string | boolean>,
   contentParts: string[]
@@ -1150,6 +1193,8 @@ async function runAppsToolsExecute(
   const scheduleId =
     typeof options.scheduleId === "string" ? String(options.scheduleId) : undefined;
   const notifyEmail = parseBooleanOption(options.notifyEmail);
+  const withSummary =
+    parseBooleanOption(options.summary) || parseBooleanOption(options.withSummary);
   const result = await executeUserTool(apiBase, apiKey, {
     appId,
     deploymentId,
@@ -1161,6 +1206,10 @@ async function runAppsToolsExecute(
     notifyEmail: notifyEmail || undefined,
   });
   console.log(JSON.stringify(result, null, 2));
+  if (withSummary && result.ok) {
+    const summary = await getAppRuntimeSummary(apiBase, apiKey, appId);
+    console.log(JSON.stringify({ summary }, null, 2));
+  }
 }
 
 async function runAppsEnvSet(
@@ -1509,6 +1558,25 @@ async function main() {
       await runAppsPerformance(options);
       return;
     }
+    if (subcommand === "summary") {
+      const target = rest[1];
+      if (!target) {
+        throw new Error("usage: apps summary <handle>/<repo>");
+      }
+      await runAppsSummary(options, target);
+      return;
+    }
+    if (subcommand === "assistant") {
+      const mode = rest[1];
+      const target = rest[2];
+      if ((mode !== "plan" && mode !== "performance") || !target) {
+        throw new Error(
+          "usage: apps assistant <plan|performance> <handle>/<repo> --prompt <text>"
+        );
+      }
+      await runAppsAssistant(options, mode, target, rest.slice(3));
+      return;
+    }
     if (subcommand === "store" && rest[1] === "events") {
       await runAppsStoreEvents(options);
       return;
@@ -1526,7 +1594,7 @@ async function main() {
       return;
     }
     throw new Error(
-      "usage: apps <list|tools|deploy|env get|env set|performance|store events|trade-facts|agent create|positions tx> [args]"
+      "usage: apps <list|tools|deploy|env get|env set|performance|summary|assistant|store events|trade-facts|agent create|positions tx> [args]"
     );
   }
 

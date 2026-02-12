@@ -1,9 +1,11 @@
 import {
+  getAppRuntimeSummary,
   createAgentFromPrompt,
   createRepo,
   deployApp,
   deployLatestTemplate,
   getAppEnvironment,
+  runAssistantMode,
   updateAppEnvironment,
   executeHostedTool,
   executeUserTool,
@@ -17,11 +19,14 @@ import {
   listApps,
   listUserTools,
   submitPositionsTx,
+  type AssistantMode,
+  type AssistantRunResponse,
   type AgentCreateRequest,
   type AppEnvironmentGetResponse,
   type AppEnvironmentUpdateRequest,
   type AppEnvironmentUpdateResponse,
   type AppListItem,
+  type AppRuntimeSummary,
   type CreateRepoRequest,
   type CreateRepoResponse,
   type DeploymentDetail,
@@ -45,11 +50,14 @@ import type { StreamCallbacks } from "./stream";
 
 export type { StreamCallbacks } from "./stream";
 export type {
+  AssistantMode,
+  AssistantRunResponse,
   AgentCreateRequest,
   AppEnvironmentGetResponse,
   AppEnvironmentUpdateRequest,
   AppEnvironmentUpdateResponse,
   AppListItem,
+  AppRuntimeSummary,
   CreateRepoRequest,
   CreateRepoResponse,
   DeploymentDetail,
@@ -80,6 +88,7 @@ export type {
 } from "./indicators";
 export {
   apiFetch,
+  getAppRuntimeSummary,
   commitFiles,
   createAgentFromPrompt,
   createRepo,
@@ -98,6 +107,7 @@ export {
   getLatestDeploymentForApp,
   getTemplateStatus,
   getUserPerformance,
+  runAssistantMode,
   listApps,
   listTemplateBranches,
   listUserTools,
@@ -210,6 +220,8 @@ export type OpenPondClient = {
     list: (options?: AppsListOptions) => Promise<AppListItem[]>;
     tools: (options?: AppsToolsOptions) => Promise<unknown[]>;
     performance: (options?: AppsPerformanceOptions) => Promise<unknown>;
+    summary: (input: AppSummaryOptions) => Promise<AppRuntimeSummary>;
+    assistantRun: (input: AppsAssistantRunOptions) => Promise<AssistantRunResponse>;
     agentCreate: (
       input: AgentCreateRequest & { refreshCache?: boolean },
       callbacks?: AgentCreateStreamCallbacks
@@ -275,6 +287,16 @@ export type AppsToolsOptions = {
 
 export type AppsPerformanceOptions = {
   appId?: string;
+};
+
+export type AppSummaryOptions = {
+  appId: string;
+};
+
+export type AppsAssistantRunOptions = {
+  appId: string;
+  mode: AssistantMode;
+  prompt: string;
 };
 
 export type ExecuteUserToolOptions = {
@@ -732,6 +754,12 @@ export function createClient(options: OpenPondClientOptions): OpenPondClient {
       },
       performance: async (options) => {
         return getUserPerformance(apiUrl, apiKey, { appId: options?.appId });
+      },
+      summary: async (input) => {
+        return getAppRuntimeSummary(apiUrl, apiKey, input.appId);
+      },
+      assistantRun: async (input) => {
+        return runAssistantMode(apiUrl, apiKey, input);
       },
       agentCreate: async (input, callbacks) => {
         const { refreshCache: refreshCacheFlag, ...rest } = input;
