@@ -284,7 +284,7 @@ function warnOnRepoHostMismatch(repoUrl: string): void {
         `warning: repo host (${repoHost}) does not match OPENPOND_BASE_URL (${baseHost})`
       );
       console.warn(
-        "warning: if this is staging, ensure INTERNAL_GIT_HOST is set on the deployment worker."
+        "warning: verify your git host configuration matches OPENPOND_BASE_URL."
       );
     }
   } catch {
