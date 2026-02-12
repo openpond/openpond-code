@@ -36,6 +36,14 @@
   "publishConfig": {
     "access": "public"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openpond/openpond-code"
+  },
+  "homepage": "https://github.com/openpond/openpond-code",
+  "bugs": {
+    "url": "https://github.com/openpond/openpond-code/issues"
+  },
   "engines": {
     "node": ">=20.0.0"
   },
