@@ -222,6 +222,94 @@ export type AppListItem = {
   } | null;
 };
 
+export type AppRuntimeSummary = {
+  app: {
+    appId: string;
+    name: string;
+    description: string | null;
+    teamId: string;
+    templateRepoUrl: string | null;
+    templateBranch: string | null;
+    initialPromptSnapshot: string | null;
+  };
+  runtime: {
+    latestDeployment: {
+      id: string;
+      status: string;
+      isProduction: boolean | null;
+      createdAt: string;
+    } | null;
+    schedules: {
+      total: number;
+      enabled: number;
+      disabled: number;
+    };
+    notifications: {
+      scheduleEmailsEnabled: boolean;
+      scheduleTweetsEnabled: boolean;
+    };
+    toolNotifyEmail: {
+      notifyEmailEnabledCount: number;
+      toolsConfiguredCount: number;
+    };
+    lastScheduleRun: {
+      id: string;
+      status: string;
+      executionTime: string;
+      scheduleName: string;
+      errorMessage: string | null;
+    } | null;
+    lastToolRun: {
+      id: string;
+      status: string;
+      endpoint: string;
+      toolName: string | null;
+      method: string | null;
+      createdAt: string;
+      executionTime: number | null;
+      error: string | null;
+    } | null;
+  };
+  wallet: {
+    personalWalletAddress: string | null;
+    operatingWalletAddress: string | null;
+    arbitrum: {
+      eth: { raw: string; formatted: string } | null;
+      usdc: { raw: string; formatted: string } | null;
+    };
+    hyperliquid: {
+      mainnet: {
+        accountValue: number | null;
+        withdrawable: number | null;
+        totalMarginUsed: number | null;
+        error?: string;
+      };
+      testnet: {
+        accountValue: number | null;
+        withdrawable: number | null;
+        totalMarginUsed: number | null;
+        error?: string;
+      };
+    };
+  };
+  asOf: string;
+};
+
+export type AssistantMode = "plan" | "performance";
+
+export type AssistantRunRequest = {
+  appId: string;
+  mode: AssistantMode;
+  prompt: string;
+};
+
+export type AssistantRunResponse = {
+  ok: boolean;
+  mode: AssistantMode;
+  conversationId: string;
+  response: string;
+};
+
 export async function listApps(
   apiBase: string,
   token: string,
@@ -474,6 +562,43 @@ export async function getUserPerformance(
     throw new Error(`Performance lookup failed: ${response.status} ${text}`);
   }
   return (await response.json()) as unknown;
+}
+
+export async function getAppRuntimeSummary(
+  baseUrl: string,
+  token: string,
+  appId: string
+): Promise<AppRuntimeSummary> {
+  const params = new URLSearchParams({ appId });
+  const response = await apiFetch(
+    baseUrl,
+    token,
+    `/apps/summary?${params.toString()}`,
+    {
+      method: "GET",
+    }
+  );
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Summary lookup failed: ${response.status} ${text}`);
+  }
+  return (await response.json()) as AppRuntimeSummary;
+}
+
+export async function runAssistantMode(
+  baseUrl: string,
+  token: string,
+  payload: AssistantRunRequest
+): Promise<AssistantRunResponse> {
+  const response = await apiFetch(baseUrl, token, "/apps/assistant/run", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Assistant run failed: ${response.status} ${text}`);
+  }
+  return (await response.json()) as AssistantRunResponse;
 }
 
 export async function postAgentDigest(
