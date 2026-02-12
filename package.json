@@ -1,6 +1,6 @@
 {
   "name": "openpond-code",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenPond CLI (API key only)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
