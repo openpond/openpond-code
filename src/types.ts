@@ -34,7 +34,6 @@ export type UsageInfo = {
 export type TemplateBootstrap = {
   name?: string;
   description?: string;
-  templateId?: string;
   templateRepoUrl?: string;
   templateBranch?: string;
   envVars?: Record<string, string>;

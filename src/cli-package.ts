@@ -1060,8 +1060,6 @@ async function runAppsAgentCreate(
   if (!prompt.trim()) {
     throw new Error("usage: apps agent create --prompt <text>");
   }
-
-  const templateId = typeof options.templateId === "string" ? options.templateId : undefined;
   const templateRepoUrl =
     typeof options.templateRepoUrl === "string" ? options.templateRepoUrl : undefined;
   const templateBranch =
@@ -1069,7 +1067,7 @@ async function runAppsAgentCreate(
   const templateLocalPath =
     typeof options.templateLocalPath === "string" ? options.templateLocalPath : undefined;
   if (templateLocalPath && String(templateLocalPath).trim().length > 0) {
-    throw new Error("templateLocalPath is not supported; use templateId or templateRepoUrl");
+    throw new Error("templateLocalPath is not supported; use templateRepoUrl");
   }
   const envVars =
     typeof options.env === "string"
@@ -1087,9 +1085,8 @@ async function runAppsAgentCreate(
   }
 
   const template =
-    templateId || templateRepoUrl || templateBranch || envVars
+    templateRepoUrl || templateBranch || envVars
       ? {
-          templateId,
           templateRepoUrl,
           templateBranch,
           envVars,

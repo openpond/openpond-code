@@ -665,9 +665,11 @@ export class ChatWorker {
         (item as any).name ||
         (item as any).appId ||
         "app";
-      const templateId =
-        typeof (item as any).templateId === "string" ? (item as any).templateId : null;
-      const suffix = templateId ? ` template=${templateId}` : "";
+      const templateRepoUrl =
+        typeof (item as any).templateRepoUrl === "string"
+          ? (item as any).templateRepoUrl
+          : null;
+      const suffix = templateRepoUrl ? ` template=${templateRepoUrl}` : "";
       return `app_creation_started: ${name}${suffix}`;
     }
     if (item.type === "app_created") {

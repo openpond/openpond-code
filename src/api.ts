@@ -107,7 +107,6 @@ export async function pollDeviceLogin(
 
 export type CreateLocalProjectInput = {
   name: string;
-  templateId?: string;
   templateRepoUrl?: string;
   templateBranch?: string;
   envVars?: Record<string, string>;
@@ -136,7 +135,6 @@ export type CreateRepoResponse = {
 export type HeadlessAppRequest = {
   name?: string;
   description?: string;
-  templateId?: string;
   templateRepoUrl?: string;
   templateBranch?: string;
   templateName?: string;
@@ -517,7 +515,6 @@ export type AgentCreateRequest = {
   template?: {
     name?: string;
     description?: string;
-    templateId?: string;
     templateRepoUrl?: string;
     templateBranch?: string;
     envVars?: Record<string, string>;
