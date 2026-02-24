@@ -1,5 +1,11 @@
 # openpond-code
 
+## 0.1.4
+
+### Patch Changes
+
+- bb79cf8: cleaned up naming
+
 ## 0.1.3
 
 ### Patch Changes
