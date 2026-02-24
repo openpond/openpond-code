@@ -437,8 +437,6 @@ async function resolveAppTarget(params: {
     const candidates = [
       app.repo,
       app.gitRepo,
-      app.internalToolName,
-      app.name,
       app.id,
     ].map(normalizeRepoName);
     return candidates.includes(normalizedRepo);

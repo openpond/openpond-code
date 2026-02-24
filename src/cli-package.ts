@@ -370,8 +370,6 @@ async function resolveAppTarget(
     const candidates = [
       app.repo,
       app.gitRepo,
-      app.internalToolName,
-      app.name,
       app.id,
     ].map(normalizeRepoName);
     return candidates.includes(normalizedRepo);
@@ -990,7 +988,7 @@ async function runAppsList(options: Record<string, string | boolean>): Promise<v
   }
   for (const app of filtered) {
     const owner = app.handle || app.gitOwner || "unknown";
-    const repo = app.repo || app.gitRepo || app.name || app.id;
+    const repo = app.repo || app.gitRepo || app.id;
     const status = app.latestDeployment?.status || "no-deploy";
     const branch = app.latestDeployment?.gitBranch || app.defaultBranch || "-";
     console.log(`${owner}/${repo}  ${status}  ${branch}  ${app.id}`);

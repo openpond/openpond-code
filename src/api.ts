@@ -201,7 +201,6 @@ export type AppListItem = {
   gitRepo: string | null;
   gitProvider: string | null;
   gitHost: string | null;
-  internalToolName: string | null;
   defaultBranch: string | null;
   createdAt: string;
   updatedAt: string;
