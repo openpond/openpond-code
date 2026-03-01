@@ -710,7 +710,7 @@ export async function chatRequest(
       body: JSON.stringify(resolvedBody),
     });
   }
-  return apiFetch(trimmed, token, "/api/chat/generator", {
+  return apiFetch(trimmed, token, "/api/chat/apps", {
     method: "POST",
     body: JSON.stringify(resolvedBody),
   });
