@@ -33,6 +33,7 @@ export type LocalConfig = {
 
 export type LoadConfigOptions = {
   account?: string;
+  baseUrl?: string;
 };
 
 const GLOBAL_DIRNAME = ".openpond";
@@ -74,15 +75,28 @@ function normalizeHandle(value: string | undefined | null): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function normalizeBaseUrl(value: string | undefined | null): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/\/$/, "");
+}
+
 function handleEquals(left: string, right: string): boolean {
   return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
 function findAccountIndex(
   accounts: LocalAccountConfig[],
-  handle: string
+  handle: string,
+  baseUrl?: string | null
 ): number {
-  return accounts.findIndex((candidate) => handleEquals(candidate.handle, handle));
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+  return accounts.findIndex((candidate) => {
+    if (!handleEquals(candidate.handle, handle)) return false;
+    if (!normalizedBaseUrl) return true;
+    return normalizeBaseUrl(candidate.baseUrl) === normalizedBaseUrl;
+  });
 }
 
 function sanitizeSession(value: unknown): LocalSessionConfig | undefined {
@@ -161,7 +175,7 @@ function normalizeGlobalConfig(raw: LocalConfig): LocalConfig {
   for (const candidate of sourceAccounts) {
     const account = sanitizeAccount(candidate);
     if (!account) continue;
-    if (findAccountIndex(accounts, account.handle) !== -1) continue;
+    if (findAccountIndex(accounts, account.handle, account.baseUrl) !== -1) continue;
     accounts.push(account);
   }
 
@@ -200,13 +214,24 @@ function resolveRequestedHandle(
 
 function ensureAccount(
   accounts: LocalAccountConfig[],
-  handle: string
+  handle: string,
+  baseUrl?: string | null
 ): LocalAccountConfig {
-  const idx = findAccountIndex(accounts, handle);
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+  const idx = findAccountIndex(accounts, handle, normalizedBaseUrl);
   if (idx !== -1) {
     return accounts[idx]!;
   }
+  if (!normalizedBaseUrl) {
+    const firstByHandle = findAccountIndex(accounts, handle);
+    if (firstByHandle !== -1) {
+      return accounts[firstByHandle]!;
+    }
+  }
   const next: LocalAccountConfig = { handle };
+  if (normalizedBaseUrl) {
+    next.baseUrl = normalizedBaseUrl;
+  }
   accounts.push(next);
   return next;
 }
@@ -274,7 +299,12 @@ function applyAccountPatch(
 
   const accounts = global.accounts ?? [];
   const handle = resolveRequestedHandle(global, source.activeHandle);
-  const account = ensureAccount(accounts, handle);
+  const requestedBaseUrl = normalizeBaseUrl(
+    hasOwn(source, "baseUrl")
+      ? (source.baseUrl ?? null)
+      : process.env.OPENPOND_BASE_URL
+  );
+  const account = ensureAccount(accounts, handle, requestedBaseUrl);
   for (const key of ACCOUNT_SCOPED_KEYS) {
     if (!hasOwn(source, key)) continue;
     applyScopedKey(account, key, (source as Record<string, unknown>)[key], options);
@@ -328,7 +358,11 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Local
   const global = await loadGlobalConfig();
   const accounts = global.accounts ?? [];
   const requested = resolveRequestedHandle(global, options.account);
-  const idx = findAccountIndex(accounts, requested);
+  const requestedBaseUrl = normalizeBaseUrl(
+    options.baseUrl ?? process.env.OPENPOND_BASE_URL
+  );
+  const idxWithBase = findAccountIndex(accounts, requested, requestedBaseUrl);
+  const idx = idxWithBase !== -1 ? idxWithBase : findAccountIndex(accounts, requested);
   const account = idx === -1 ? null : accounts[idx]!;
   const session = account?.session;
   return {

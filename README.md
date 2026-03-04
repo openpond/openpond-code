@@ -52,6 +52,7 @@ openpond opentool init --dir .
 Global account selection:
 
 - `--account <name>` (alias `--profile <name>`) selects which stored account/API key to use.
+- `--base-url <url>` (alias `--baseurl`) selects the account entry matching that base URL when duplicate handles exist (for example, staging vs production).
 - `OPENPOND_ACCOUNT=<name>` sets the default selected account for a shell/session.
 - If omitted, CLI uses the last active stored account.
 

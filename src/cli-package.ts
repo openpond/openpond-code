@@ -92,15 +92,49 @@ function resolveAccountOption(options: Record<string, string | boolean>): string
   return trimmed;
 }
 
+function resolveBaseUrlOption(options: Record<string, string | boolean>): string | null {
+  const raw =
+    typeof options.baseUrl === "string"
+      ? options.baseUrl
+      : typeof options.baseurl === "string"
+        ? options.baseurl
+        : null;
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === "true") {
+    throw new Error("baseurl must be a non-empty value");
+  }
+  return trimmed.replace(/\/$/, "");
+}
+
 function resolveBaseUrl(config: LocalConfig): string {
   const envBase = process.env.OPENPOND_BASE_URL;
   const base = envBase || config.baseUrl || "https://openpond.ai";
   return base.replace(/\/$/, "");
 }
 
-function resolvePublicApiBaseUrl(): string {
+function mapUiBaseToApiBase(baseUrl: string | undefined): string | null {
+  if (!baseUrl) return null;
+  const trimmed = baseUrl.replace(/\/$/, "");
+  try {
+    const url = new URL(trimmed);
+    const host = url.hostname.toLowerCase();
+    if (host === "staging.openpond.ai") {
+      return "https://api.staging-api.openpond.ai";
+    }
+    if (host === "openpond.ai" || host === "openpond.live" || host === "www.openpond.live") {
+      return "https://api.openpond.ai";
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function resolvePublicApiBaseUrl(config?: LocalConfig): string {
   const envBase = process.env.OPENPOND_API_URL;
-  const base = envBase || "https://api.openpond.ai";
+  const mapped = mapUiBaseToApiBase(process.env.OPENPOND_BASE_URL || config?.baseUrl);
+  const base = envBase || mapped || "https://api.openpond.ai";
   return base.replace(/\/$/, "");
 }
 
@@ -452,7 +486,7 @@ async function runTemplateStatus(
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
   const { app } = await resolveAppTarget(apiBase, apiKey, target);
   const status = await getTemplateStatus(apiBase, apiKey, app.id);
@@ -465,7 +499,7 @@ async function runTemplateBranches(
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
   const { app } = await resolveAppTarget(apiBase, apiKey, target);
   const branches = await listTemplateBranches(apiBase, apiKey, app.id);
@@ -478,7 +512,7 @@ async function runTemplateUpdate(
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
   const { app } = await resolveAppTarget(apiBase, apiKey, target);
   const envRaw =
@@ -532,10 +566,11 @@ function printHelp(): void {
   console.log("");
   console.log("Global options:");
   console.log("  --account <name> (alias: --profile <name>)");
+  console.log("  --base-url <url> (alias: --baseurl)");
   console.log("");
   console.log("Env:");
   console.log(
-    "  OPENPOND_API_KEY, OPENPOND_ACCOUNT, OPENPOND_API_URL, OPENPOND_TOOL_URL"
+    "  OPENPOND_API_KEY, OPENPOND_ACCOUNT, OPENPOND_BASE_URL, OPENPOND_API_URL, OPENPOND_TOOL_URL"
   );
 }
 
@@ -562,7 +597,7 @@ async function runLogin(options: Record<string, string | boolean>): Promise<void
 async function runToolList(options: Record<string, string | boolean>, target: string) {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
   const { app } = await resolveAppTarget(apiBase, apiKey, target);
   const branch = typeof options.branch === "string" ? String(options.branch) : undefined;
@@ -604,7 +639,7 @@ async function runToolRun(
 ) {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
   const { app } = await resolveAppTarget(apiBase, apiKey, target);
   const branch = typeof options.branch === "string" ? String(options.branch) : undefined;
@@ -643,7 +678,7 @@ async function runDeployWatch(
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
   const { app, handle, repo } = await resolveAppTarget(apiBase, apiKey, target);
   const branch = typeof options.branch === "string" ? String(options.branch) : undefined;
@@ -685,7 +720,7 @@ async function runRepoCreate(
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
 
   const templateInput = typeof options.template === "string" ? options.template.trim() : "";
   if (templateInput && (options.empty === "true" || options.opentool === "true")) {
@@ -981,7 +1016,7 @@ async function runAppsTools(): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const tools = await fetchToolsWithCache({ apiBase, apiKey });
   console.log(JSON.stringify(tools, null, 2));
 }
@@ -989,7 +1024,7 @@ async function runAppsTools(): Promise<void> {
 async function runAppsList(options: Record<string, string | boolean>): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
   const handle = typeof options.handle === "string" ? String(options.handle) : undefined;
   const normalizedHandle = handle ? normalizeRepoName(handle) : null;
@@ -1023,7 +1058,7 @@ async function runAppsPerformance(options: Record<string, string | boolean>): Pr
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const appId = typeof options.appId === "string" ? String(options.appId) : undefined;
   const performance = await getUserPerformance(apiBase, apiKey, { appId });
   console.log(JSON.stringify(performance, null, 2));
@@ -1035,7 +1070,7 @@ async function runAppsSummary(
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
   const { app } = await resolveAppTarget(apiBase, apiKey, target);
   const summary = await getAppRuntimeSummary(apiBase, apiKey, app.id);
@@ -1057,7 +1092,7 @@ async function runAppsAssistant(
 
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
   const { app } = await resolveAppTarget(apiBase, apiKey, target);
   const result = await runAssistantMode(apiBase, apiKey, {
@@ -1075,7 +1110,7 @@ async function runAppsAgentCreate(
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const prompt =
     (typeof options.prompt === "string" ? options.prompt : null) ||
     contentParts.join(" ");
@@ -1191,7 +1226,7 @@ async function runAppsToolsExecute(
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const methodRaw =
     typeof options.method === "string" ? String(options.method).toUpperCase() : undefined;
   const method =
@@ -1263,7 +1298,7 @@ async function runAppsEnvSet(
 
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
   const { app } = await resolveAppTarget(apiBase, apiKey, target);
   const result = await updateAppEnvironment(apiBase, apiKey, app.id, { envVars });
@@ -1276,7 +1311,7 @@ async function runAppsEnvGet(
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
   const { app } = await resolveAppTarget(apiBase, apiKey, target);
   const result = await getAppEnvironment(apiBase, apiKey, app.id);
@@ -1289,7 +1324,7 @@ async function runAppsDeploy(
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
   const { app, handle, repo } = await resolveAppTarget(apiBase, apiKey, target);
   const envRaw =
@@ -1324,7 +1359,7 @@ async function runAppsPositionsTx(
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const methodRaw =
     typeof options.method === "string" ? String(options.method).toUpperCase() : "POST";
   const method = methodRaw === "GET" ? "GET" : "POST";
@@ -1407,7 +1442,7 @@ async function runAppsStoreEvents(
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const query = resolveStoreEventsParams(options);
   const result = await submitPositionsTx(apiBase, apiKey, {
     method: "GET",
@@ -1422,7 +1457,7 @@ async function runAppsTradeFacts(
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
-  const apiBase = resolvePublicApiBaseUrl();
+  const apiBase = resolvePublicApiBaseUrl(config);
   const appId = typeof options.appId === "string" ? options.appId : undefined;
   const performance = await getUserPerformance(apiBase, apiKey, { appId });
   if (
@@ -1440,8 +1475,15 @@ async function runAppsTradeFacts(
 async function main() {
   const { command, options, rest } = parseArgs(process.argv.slice(2));
   const selectedAccount = resolveAccountOption(options);
+  const selectedBaseUrl = resolveBaseUrlOption(options);
   if (selectedAccount) {
     process.env.OPENPOND_ACCOUNT = selectedAccount;
+  }
+  if (!selectedAccount && typeof options.handle === "string" && options.handle.trim().length > 0) {
+    process.env.OPENPOND_ACCOUNT = options.handle.trim();
+  }
+  if (selectedBaseUrl) {
+    process.env.OPENPOND_BASE_URL = selectedBaseUrl;
   }
 
   if (!command || command === "help") {
