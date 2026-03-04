@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { promises as fs, existsSync } from "node:fs";
+import { promises as fs, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
@@ -48,7 +48,65 @@ type Command =
   | "repo"
   | "template"
   | "opentool"
+  | "check-update"
+  | "version"
   | "help";
+
+function getInstalledCliVersion(): string {
+  try {
+    const packageJsonPath = new URL("../package.json", import.meta.url);
+    const raw = readFileSync(packageJsonPath, "utf-8");
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    return typeof parsed.version === "string" ? parsed.version : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function parseSemver(version: string): [number, number, number] | null {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version.trim());
+  if (!match) return null;
+  const major = Number.parseInt(match[1]!, 10);
+  const minor = Number.parseInt(match[2]!, 10);
+  const patch = Number.parseInt(match[3]!, 10);
+  if (!Number.isFinite(major) || !Number.isFinite(minor) || !Number.isFinite(patch)) {
+    return null;
+  }
+  return [major, minor, patch];
+}
+
+function compareSemver(left: string, right: string): number | null {
+  const l = parseSemver(left);
+  const r = parseSemver(right);
+  if (!l || !r) return null;
+  for (let i = 0; i < 3; i += 1) {
+    if (l[i]! < r[i]!) return -1;
+    if (l[i]! > r[i]!) return 1;
+  }
+  return 0;
+}
+
+async function fetchLatestNpmVersion(packageName: string): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 7000);
+  try {
+    const response = await fetch(
+      `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`,
+      { signal: controller.signal }
+    );
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(`npm registry request failed: ${response.status} ${text}`.trim());
+    }
+    const payload = (await response.json().catch(() => ({}))) as { version?: unknown };
+    if (typeof payload.version !== "string" || payload.version.trim().length === 0) {
+      throw new Error("npm registry payload missing version");
+    }
+    return payload.version.trim();
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 type RepoTarget = { handle: string; repo: string };
 
@@ -532,6 +590,8 @@ function printHelp(): void {
   console.log("OpenPond CLI (API key only)");
   console.log("");
   console.log("Usage:");
+  console.log("  openpond --version");
+  console.log("  openpond --check-update");
   console.log("  openpond login [--api-key <key>]");
   console.log("  openpond tool list <handle>/<repo>");
   console.log("  openpond tool run <handle>/<repo> <tool> [--body <json>] [--method <METHOD>]");
@@ -562,6 +622,7 @@ function printHelp(): void {
   console.log(
     "  openpond apps positions tx [--method <GET|POST>] [--body <json>] [--params <json>]"
   );
+  console.log("  openpond check-update");
   console.log("  openpond opentool <init|validate|build> [args]");
   console.log("");
   console.log("Global options:");
@@ -1010,6 +1071,39 @@ async function runOpentool(rawArgs: string[]): Promise<void> {
   if (result.code !== 0) {
     throw new Error("opentool command failed");
   }
+}
+
+async function runCheckUpdate(): Promise<void> {
+  const packageName = "openpond-code";
+  const installed = getInstalledCliVersion();
+  const latest = await fetchLatestNpmVersion(packageName);
+  const installCommand = `npm i -g ${packageName}@${latest}`;
+  const cmp = compareSemver(installed, latest);
+
+  if (cmp === 0) {
+    console.log(`${packageName} is up to date (${installed})`);
+    return;
+  }
+
+  if (cmp === -1) {
+    console.log(`Update available: ${installed} -> ${latest}`);
+    console.log(`Run: ${installCommand}`);
+    return;
+  }
+
+  if (cmp === 1) {
+    console.log(`Installed version (${installed}) is newer than npm latest (${latest}).`);
+    return;
+  }
+
+  if (installed === latest) {
+    console.log(`${packageName} is up to date (${installed})`);
+    return;
+  }
+
+  console.log(`Installed: ${installed}`);
+  console.log(`Latest: ${latest}`);
+  console.log(`Run: ${installCommand}`);
 }
 
 async function runAppsTools(): Promise<void> {
@@ -1484,6 +1578,16 @@ async function main() {
   }
   if (selectedBaseUrl) {
     process.env.OPENPOND_BASE_URL = selectedBaseUrl;
+  }
+
+  if (options.checkUpdate !== undefined || command === "check-update") {
+    await runCheckUpdate();
+    return;
+  }
+
+  if (options.version !== undefined || command === "version") {
+    console.log(getInstalledCliVersion());
+    return;
   }
 
   if (!command || command === "help") {

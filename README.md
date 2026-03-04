@@ -28,6 +28,8 @@ openpond login --account secondary --api-key opk_secondary_...
 Commands:
 
 ```bash
+openpond --version
+openpond --check-update
 openpond --account production apps list
 openpond tool list <handle>/<repo>
 openpond tool run <handle>/<repo> <tool> --body '{"foo":"bar"}'
