@@ -54,7 +54,7 @@ type RepoTarget = { handle: string; repo: string };
 
 function parseArgs(argv: string[]) {
   const args = [...argv];
-  const command = (args.shift() || "") as Command;
+  let command = "" as Command;
   const options: Record<string, string | boolean> = {};
   const rest: string[] = [];
 
@@ -66,11 +66,30 @@ function parseArgs(argv: string[]) {
       const value = args[0] && !args[0].startsWith("--") ? args.shift()! : "true";
       options[key] = value;
     } else {
-      rest.push(next);
+      if (!command) {
+        command = next as Command;
+      } else {
+        rest.push(next);
+      }
     }
   }
 
   return { command, options, rest };
+}
+
+function resolveAccountOption(options: Record<string, string | boolean>): string | null {
+  const raw =
+    typeof options.account === "string"
+      ? options.account
+      : typeof options.profile === "string"
+        ? options.profile
+        : null;
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === "true") {
+    throw new Error("account must be a non-empty value");
+  }
+  return trimmed;
 }
 
 function resolveBaseUrl(config: LocalConfig): string {
@@ -175,7 +194,7 @@ async function ensureApiKey(config: LocalConfig, baseUrl: string): Promise<strin
   const existing = resolveApiKey(config);
   if (existing) return existing;
   const apiKey = await promptForApiKey();
-  await saveGlobalConfig({ apiKey, baseUrl });
+  await saveGlobalConfig({ apiKey, baseUrl, activeHandle: config.activeHandle });
   console.log("saved api key to ~/.openpond/config.json");
   return apiKey;
 }
@@ -511,8 +530,13 @@ function printHelp(): void {
   );
   console.log("  openpond opentool <init|validate|build> [args]");
   console.log("");
+  console.log("Global options:");
+  console.log("  --account <name> (alias: --profile <name>)");
+  console.log("");
   console.log("Env:");
-  console.log("  OPENPOND_API_KEY, OPENPOND_BASE_URL, OPENPOND_API_URL, OPENPOND_TOOL_URL");
+  console.log(
+    "  OPENPOND_API_KEY, OPENPOND_ACCOUNT, OPENPOND_API_URL, OPENPOND_TOOL_URL"
+  );
 }
 
 async function runLogin(options: Record<string, string | boolean>): Promise<void> {
@@ -531,7 +555,7 @@ async function runLogin(options: Record<string, string | boolean>): Promise<void
   if (!apiKey.startsWith("opk_")) {
     console.log("warning: API keys usually start with opk_.");
   }
-  await saveGlobalConfig({ apiKey, baseUrl });
+  await saveGlobalConfig({ apiKey, baseUrl, activeHandle: config.activeHandle });
   console.log("saved api key to ~/.openpond/config.json");
 }
 
@@ -1415,6 +1439,10 @@ async function runAppsTradeFacts(
 
 async function main() {
   const { command, options, rest } = parseArgs(process.argv.slice(2));
+  const selectedAccount = resolveAccountOption(options);
+  if (selectedAccount) {
+    process.env.OPENPOND_ACCOUNT = selectedAccount;
+  }
 
   if (!command || command === "help") {
     printHelp();

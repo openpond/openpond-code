@@ -20,11 +20,15 @@ Login (stores key in `~/.openpond/config.json`):
 openpond login
 # or (non-interactive)
 openpond login --api-key opk_...
+# or save under an account profile
+openpond login --account production --api-key opk_prod_...
+openpond login --account secondary --api-key opk_secondary_...
 ```
 
 Commands:
 
 ```bash
+openpond --account production apps list
 openpond tool list <handle>/<repo>
 openpond tool run <handle>/<repo> <tool> --body '{"foo":"bar"}'
 openpond deploy watch <handle>/<repo> --branch main
@@ -44,6 +48,12 @@ openpond apps tools execute <appId> <deploymentId> <tool> --body '{"foo":"bar"}'
 openpond apps positions tx --method GET --params '{"status":"open"}'
 openpond opentool init --dir .
 ```
+
+Global account selection:
+
+- `--account <name>` (alias `--profile <name>`) selects which stored account/API key to use.
+- `OPENPOND_ACCOUNT=<name>` sets the default selected account for a shell/session.
+- If omitted, CLI uses the last active stored account.
 
 Command reference:
 
@@ -99,8 +109,8 @@ await client.apps.agentCreate(
 );
 ```
 
-You can override hosts with `baseUrl`, `apiUrl`, and `toolUrl` in `createClient`, or
-via `OPENPOND_BASE_URL`, `OPENPOND_API_URL`, and `OPENPOND_TOOL_URL`.
+You can override hosts with `apiUrl` and `toolUrl` in `createClient`, or
+via `OPENPOND_API_URL` and `OPENPOND_TOOL_URL`.
 
 Examples live in `examples`.
 
