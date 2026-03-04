@@ -17,9 +17,13 @@ function parseArg(flag: string): string | null {
 async function main() {
   const mode = (parseArg("--mode") ?? "chat") as Mode;
   const tabId = parseArg("--tab") ?? `tab-${Date.now()}`;
+  const account = parseArg("--account") ?? parseArg("--profile");
+  if (account) {
+    process.env.OPENPOND_ACCOUNT = account;
+  }
   const socketPath = process.env.OPENPOND_IPC_SOCKET || getSocketPath();
 
-  const config = await loadConfig();
+  const config = await loadConfig({ account: account ?? undefined });
   const baseUrl =
     config.baseUrl || process.env.OPENPOND_BASE_URL || "http://localhost:3000";
 
