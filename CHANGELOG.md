@@ -1,5 +1,11 @@
 # openpond-code
 
+## 0.2.1
+
+### Patch Changes
+
+- d1479e9: updated base url
+
 ## 0.2.0
 
 ### Minor Changes
