@@ -1,5 +1,11 @@
 # openpond-code
 
+## 0.2.0
+
+### Minor Changes
+
+- b6e5f07: added multi accounts
+
 ## 0.1.4
 
 ### Patch Changes
