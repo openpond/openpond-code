@@ -1,5 +1,11 @@
 # openpond-code
 
+## 0.2.2
+
+### Patch Changes
+
+- 0212347: added version command
+
 ## 0.2.1
 
 ### Patch Changes
