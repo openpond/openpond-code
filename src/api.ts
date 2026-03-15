@@ -742,6 +742,22 @@ export async function submitBacktestTx(
   return (await response.json()) as unknown;
 }
 
+export async function submitBacktestDetail(
+  baseUrl: string,
+  token: string,
+  query: Record<string, string>
+): Promise<unknown> {
+  const qs = new URLSearchParams(query).toString();
+  const response = await apiFetch(baseUrl, token, `/apps/backtests/detail?${qs}`, {
+    method: "GET",
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Backtest detail failed: ${response.status} ${text}`);
+  }
+  return (await response.json()) as unknown;
+}
+
 export async function chatRequest(
   baseUrl: string,
   token: string,

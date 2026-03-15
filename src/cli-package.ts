@@ -28,6 +28,7 @@ import {
   executeUserTool,
   runAssistantMode,
   submitPositionsTx,
+  submitBacktestDetail,
   submitBacktestRun,
   submitBacktestTx,
   type AppListItem,
@@ -604,6 +605,7 @@ function printHelp(): void {
   console.log(
     "  openpond backtest events <handle>/<repo> [--run-id <id>] [--source <source>] [--status <csv>] [--symbol <symbol>] [--wallet-address <0x...>] [--since <ms|iso>] [--until <ms|iso>] [--limit <n>] [--cursor <cursor>] [--params <json>]"
   );
+  console.log("  openpond backtest get <handle>/<repo> --run-id <id>");
   console.log("  openpond deploy watch <handle>/<repo> [--branch <branch>]");
   console.log("  openpond template status <handle>/<repo>");
   console.log("  openpond template branches <handle>/<repo>");
@@ -1666,6 +1668,32 @@ async function runBacktestEvents(
   console.log(JSON.stringify(result, null, 2));
 }
 
+async function runBacktestGet(
+  options: Record<string, string | boolean>,
+  target: string
+): Promise<void> {
+  const runId =
+    typeof options.runId === "string"
+      ? options.runId.trim()
+      : typeof options.backtestRunId === "string"
+        ? options.backtestRunId.trim()
+        : "";
+  if (!runId) {
+    throw new Error("usage: backtest get <handle>/<repo> --run-id <id>");
+  }
+
+  const config = await loadConfig();
+  const uiBase = resolveBaseUrl(config);
+  const apiKey = await ensureApiKey(config, uiBase);
+  const apiBase = resolvePublicApiBaseUrl(config);
+  const { app } = await resolveAppTarget(apiBase, apiKey, target);
+  const result = await submitBacktestDetail(apiBase, apiKey, {
+    appId: app.id,
+    runId,
+  });
+  console.log(JSON.stringify(result, null, 2));
+}
+
 async function runAppsTradeFacts(
   options: Record<string, string | boolean>
 ): Promise<void> {
@@ -1766,8 +1794,16 @@ async function main() {
       await runBacktestEvents(options, target);
       return;
     }
+    if (subcommand === "get") {
+      const target = rest[1];
+      if (!target) {
+        throw new Error("usage: backtest get <handle>/<repo> --run-id <id>");
+      }
+      await runBacktestGet(options, target);
+      return;
+    }
     throw new Error(
-      "usage: backtest <run|events> <handle>/<repo> [args]"
+      "usage: backtest <run|events|get> <handle>/<repo> [args]"
     );
   }
 
