@@ -682,6 +682,66 @@ export async function submitPositionsTx(
   return (await response.json()) as unknown;
 }
 
+export type BacktestRunRequest = {
+  appId: string;
+  deploymentId: string;
+  toolName?: string;
+  method?: "GET" | "POST" | "PUT" | "DELETE";
+  symbol?: string;
+  timeframeStart?: string;
+  timeframeEnd?: string;
+  lookbackDays?: number;
+  initialEquityUsd?: number;
+  source?: string;
+  fillModel?: string;
+  feeModel?: string;
+  slippageBps?: number;
+  headers?: Record<string, string>;
+};
+
+export async function submitBacktestRun(
+  baseUrl: string,
+  token: string,
+  body: BacktestRunRequest
+): Promise<unknown> {
+  const response = await apiFetch(baseUrl, token, "/apps/backtests/run", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Backtest run failed: ${response.status} ${text}`);
+  }
+  return (await response.json()) as unknown;
+}
+
+export async function submitBacktestTx(
+  baseUrl: string,
+  token: string,
+  params: {
+    method: "GET" | "POST";
+    body?: unknown;
+    query?: Record<string, string>;
+  }
+): Promise<unknown> {
+  const qs =
+    params.query && Object.keys(params.query).length > 0
+      ? `?${new URLSearchParams(params.query).toString()}`
+      : "";
+  const response = await apiFetch(baseUrl, token, `/apps/backtests/tx${qs}`, {
+    method: params.method,
+    body:
+      params.method === "POST" && params.body !== undefined
+        ? JSON.stringify(params.body)
+        : undefined,
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Backtests request failed: ${response.status} ${text}`);
+  }
+  return (await response.json()) as unknown;
+}
+
 export async function chatRequest(
   baseUrl: string,
   token: string,

@@ -28,6 +28,8 @@ import {
   executeUserTool,
   runAssistantMode,
   submitPositionsTx,
+  submitBacktestRun,
+  submitBacktestTx,
   type AppListItem,
 } from "./api";
 import {
@@ -44,6 +46,7 @@ type Command =
   | "login"
   | "tool"
   | "deploy"
+  | "backtest"
   | "apps"
   | "repo"
   | "template"
@@ -595,6 +598,12 @@ function printHelp(): void {
   console.log("  openpond login [--api-key <key>]");
   console.log("  openpond tool list <handle>/<repo>");
   console.log("  openpond tool run <handle>/<repo> <tool> [--body <json>] [--method <METHOD>]");
+  console.log(
+    "  openpond backtest run <handle>/<repo> <tool> [--body <json>] [--branch <branch>] [--deployment-id <id>]"
+  );
+  console.log(
+    "  openpond backtest events <handle>/<repo> [--run-id <id>] [--source <source>] [--status <csv>] [--symbol <symbol>] [--wallet-address <0x...>] [--since <ms|iso>] [--until <ms|iso>] [--limit <n>] [--cursor <cursor>] [--params <json>]"
+  );
   console.log("  openpond deploy watch <handle>/<repo> [--branch <branch>]");
   console.log("  openpond template status <handle>/<repo>");
   console.log("  openpond template branches <handle>/<repo>");
@@ -731,6 +740,48 @@ async function runToolRun(
   }
   const output = result.data ?? { ok: true };
   console.log(JSON.stringify(output, null, 2));
+}
+
+async function runBacktestRun(
+  options: Record<string, string | boolean>,
+  target: string,
+  toolName: string
+): Promise<void> {
+  const config = await loadConfig();
+  const uiBase = resolveBaseUrl(config);
+  const apiBase = resolvePublicApiBaseUrl(config);
+  const apiKey = await ensureApiKey(config, uiBase);
+  const { app } = await resolveAppTarget(apiBase, apiKey, target);
+  const branch = typeof options.branch === "string" ? String(options.branch) : undefined;
+  const deploymentId =
+    typeof options.deploymentId === "string" ? String(options.deploymentId) : undefined;
+  const latest =
+    deploymentId
+      ? { id: deploymentId }
+      : await getLatestDeploymentForApp(apiBase, apiKey, app.id, { branch });
+  if (!latest?.id) {
+    throw new Error("no deployments found");
+  }
+
+  const bodyRaw =
+    typeof options.body === "string"
+      ? parseJsonOption(String(options.body), "body")
+      : {};
+  if (!bodyRaw || typeof bodyRaw !== "object" || Array.isArray(bodyRaw)) {
+    throw new Error("body must be a JSON object");
+  }
+
+  const method =
+    typeof options.method === "string" ? String(options.method).toUpperCase() : "POST";
+  const payload = {
+    ...(bodyRaw as Record<string, unknown>),
+    appId: app.id,
+    deploymentId: latest.id,
+    toolName,
+    method: method as "GET" | "POST" | "PUT" | "DELETE",
+  };
+  const result = await submitBacktestRun(apiBase, apiKey, payload);
+  console.log(JSON.stringify(result, null, 2));
 }
 
 async function runDeployWatch(
@@ -1530,6 +1581,56 @@ function resolveStoreEventsParams(
   return Object.keys(params).length ? params : undefined;
 }
 
+function resolveBacktestEventsParams(
+  options: Record<string, string | boolean>
+): Record<string, string> | undefined {
+  let params: Record<string, string> = {};
+  if (typeof options.params === "string") {
+    const parsed = parseJsonOption(String(options.params), "params");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("params must be a JSON object");
+    }
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (value === undefined) continue;
+      params[key] = typeof value === "string" ? value : JSON.stringify(value);
+    }
+  }
+
+  const addParam = (key: string, value: string | undefined) => {
+    if (value === undefined || value === "") return;
+    params[key] = value;
+  };
+
+  addParam("source", typeof options.source === "string" ? options.source.trim() : undefined);
+  addParam(
+    "walletAddress",
+    typeof options.walletAddress === "string" ? options.walletAddress.trim() : undefined
+  );
+  addParam("symbol", typeof options.symbol === "string" ? options.symbol.trim() : undefined);
+  addParam("cursor", typeof options.cursor === "string" ? options.cursor.trim() : undefined);
+  addParam("status", typeof options.status === "string" ? options.status.trim() : undefined);
+  addParam(
+    "backtestRunId",
+    typeof options.runId === "string"
+      ? options.runId.trim()
+      : typeof options.backtestRunId === "string"
+        ? options.backtestRunId.trim()
+        : undefined
+  );
+  addParam("since", parseTimeOption(options.since, "since"));
+  addParam("until", parseTimeOption(options.until, "until"));
+
+  if (typeof options.limit === "string" && options.limit.trim().length > 0) {
+    const parsed = Number.parseInt(options.limit, 10);
+    if (!Number.isFinite(parsed)) {
+      throw new Error("limit must be a number");
+    }
+    addParam("limit", String(parsed));
+  }
+
+  return Object.keys(params).length ? params : undefined;
+}
+
 async function runAppsStoreEvents(
   options: Record<string, string | boolean>
 ): Promise<void> {
@@ -1539,6 +1640,26 @@ async function runAppsStoreEvents(
   const apiBase = resolvePublicApiBaseUrl(config);
   const query = resolveStoreEventsParams(options);
   const result = await submitPositionsTx(apiBase, apiKey, {
+    method: "GET",
+    query,
+  });
+  console.log(JSON.stringify(result, null, 2));
+}
+
+async function runBacktestEvents(
+  options: Record<string, string | boolean>,
+  target: string
+): Promise<void> {
+  const config = await loadConfig();
+  const uiBase = resolveBaseUrl(config);
+  const apiKey = await ensureApiKey(config, uiBase);
+  const apiBase = resolvePublicApiBaseUrl(config);
+  const { app } = await resolveAppTarget(apiBase, apiKey, target);
+  const query = {
+    ...(resolveBacktestEventsParams(options) ?? {}),
+    appId: app.id,
+  };
+  const result = await submitBacktestTx(apiBase, apiKey, {
     method: "GET",
     query,
   });
@@ -1620,6 +1741,34 @@ async function main() {
       return;
     }
     throw new Error("usage: tool <list|run> <handle>/<repo> [args]");
+  }
+
+  if (command === "backtest") {
+    const subcommand = rest[0] || "run";
+    if (subcommand === "run") {
+      const target = rest[1];
+      const toolName = rest[2];
+      if (!target || !toolName) {
+        throw new Error(
+          "usage: backtest run <handle>/<repo> <tool> [--body <json>] [--branch <branch>] [--deployment-id <id>]"
+        );
+      }
+      await runBacktestRun(options, target, toolName);
+      return;
+    }
+    if (subcommand === "events") {
+      const target = rest[1];
+      if (!target) {
+        throw new Error(
+          "usage: backtest events <handle>/<repo> [--run-id <id>] [--limit <n>]"
+        );
+      }
+      await runBacktestEvents(options, target);
+      return;
+    }
+    throw new Error(
+      "usage: backtest <run|events> <handle>/<repo> [args]"
+    );
   }
 
   if (command === "deploy") {
