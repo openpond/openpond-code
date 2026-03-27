@@ -1,5 +1,11 @@
 # openpond-code
 
+## 0.2.3
+
+### Patch Changes
+
+- 59a2c17: remove cli device code login
+
 ## 0.2.2
 
 ### Patch Changes
