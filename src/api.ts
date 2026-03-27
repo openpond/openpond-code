@@ -1,16 +1,5 @@
 import type { ChatRequestBody } from "./types";
 
-export type DeviceStartResponse = {
-  deviceCode: string;
-  userCode: string;
-  verificationUrl: string;
-  expiresAt: string;
-};
-
-export type DevicePollResponse = {
-  accessToken?: string;
-};
-
 export type ToolManifest = {
   version?: string;
   tools: Array<{
@@ -64,45 +53,6 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
-}
-
-export async function startDeviceLogin(
-  baseUrl: string
-): Promise<DeviceStartResponse> {
-  const response = await apiFetch(baseUrl, null, "/api/auth/device/start", {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(
-      `Device login start failed: ${response.status} ${text}`
-    );
-  }
-  return (await response.json()) as DeviceStartResponse;
-}
-
-export async function pollDeviceLogin(
-  baseUrl: string,
-  deviceCode?: string,
-  userCode?: string
-): Promise<DevicePollResponse> {
-  const payload =
-    userCode && typeof userCode === "string"
-      ? { userCode }
-      : { deviceCode };
-  const response = await apiFetch(baseUrl, null, "/api/auth/device/poll", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-  if (response.status === 202) {
-    return {};
-  }
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Device login poll failed: ${response.status} ${text}`);
-  }
-  return (await response.json()) as DevicePollResponse;
 }
 
 export type CreateLocalProjectInput = {

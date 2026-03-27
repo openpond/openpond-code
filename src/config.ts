@@ -4,7 +4,6 @@ import path from "node:path";
 
 export type LocalSessionConfig = {
   token?: string;
-  deviceCode?: string | null;
   appId?: string | null;
   conversationId?: string | null;
 };
@@ -23,7 +22,6 @@ export type LocalConfig = {
   baseUrl?: string;
   apiKey?: string;
   token?: string;
-  deviceCode?: string | null;
   appId?: string | null;
   conversationId?: string | null;
   lspEnabled?: boolean;
@@ -43,7 +41,6 @@ const ACCOUNT_SCOPED_KEYS = [
   "apiKey",
   "baseUrl",
   "token",
-  "deviceCode",
   "appId",
   "conversationId",
 ] as const;
@@ -106,9 +103,6 @@ function sanitizeSession(value: unknown): LocalSessionConfig | undefined {
   const input = value as Record<string, unknown>;
   const out: LocalSessionConfig = {};
   if (typeof input.token === "string") out.token = input.token;
-  if (typeof input.deviceCode === "string" || input.deviceCode === null) {
-    out.deviceCode = input.deviceCode;
-  }
   if (typeof input.appId === "string" || input.appId === null) {
     out.appId = input.appId;
   }
@@ -138,9 +132,6 @@ function sanitizeAccount(value: unknown): LocalAccountConfig | null {
 function extractLegacySession(raw: LocalConfig): LocalSessionConfig | undefined {
   const session: LocalSessionConfig = {};
   if (typeof raw.token === "string") session.token = raw.token;
-  if (typeof raw.deviceCode === "string" || raw.deviceCode === null) {
-    session.deviceCode = raw.deviceCode;
-  }
   if (typeof raw.appId === "string" || raw.appId === null) {
     session.appId = raw.appId;
   }
@@ -271,7 +262,6 @@ function applyScopedKey(
       return;
     }
     case "token":
-    case "deviceCode":
     case "appId":
     case "conversationId": {
       if (!account.session) account.session = {};
@@ -371,7 +361,6 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Local
     apiKey: account?.apiKey,
     baseUrl: account?.baseUrl,
     token: session?.token,
-    deviceCode: session?.deviceCode,
     appId: session?.appId,
     conversationId: session?.conversationId,
   };

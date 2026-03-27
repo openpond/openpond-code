@@ -4,10 +4,8 @@ import path from "node:path";
 import {
   chatRequest,
   createLocalProject,
-  pollDeviceLogin,
-  startDeviceLogin,
 } from "./api";
-import { saveConfig, saveGlobalConfig, type LocalConfig } from "./config";
+import { saveConfig, type LocalConfig } from "./config";
 import { loadHistory, saveHistory, type HistoryEntry } from "./history";
 import { getGitHash } from "./hash";
 import { consumeStream } from "./stream";
@@ -21,9 +19,7 @@ import { executeLocalTool } from "./tools";
 
 type LoginState =
   | { status: "idle" }
-  | { status: "ready"; token: string }
-  | { status: "pending"; userCode: string; verificationUrl: string; deviceCode: string }
-  | { status: "error"; message: string };
+  | { status: "ready"; token: string };
 
 export type ChatWorkerEvents = {
   onLine: (text: string) => void;
@@ -49,7 +45,6 @@ export class ChatWorker {
   private chatMode: "general" | "builder" = "builder";
   private loginState: LoginState = { status: "idle" };
   private streamingText = "";
-  private pollingTimer: ReturnType<typeof setTimeout> | null = null;
   private historyId = `chat-${Date.now()}`;
   private historyStartedAt = new Date().toISOString();
   private gitHash: string | null = null;
@@ -61,8 +56,9 @@ export class ChatWorker {
     this.conversationId = initialConfig.conversationId ?? null;
     this.appId = initialConfig.appId ?? null;
     this.chatMode = initialConfig.mode ?? "builder";
-    if (initialConfig.token) {
-      this.loginState = { status: "ready", token: initialConfig.token };
+    const configuredApiKey = this.resolveConfiguredApiKey(initialConfig);
+    if (configuredApiKey) {
+      this.loginState = { status: "ready", token: configuredApiKey };
     }
   }
 
@@ -70,12 +66,7 @@ export class ChatWorker {
     this.emitState();
   }
 
-  stop(): void {
-    if (this.pollingTimer) {
-      clearTimeout(this.pollingTimer);
-      this.pollingTimer = null;
-    }
-  }
+  stop(): void {}
 
   async handleInput(text: string): Promise<void> {
     const trimmed = text.trim();
@@ -103,8 +94,8 @@ export class ChatWorker {
   }
 
   private footerHint(): string {
-    if (this.loginState.status === "pending") {
-      return "login pending · /login check";
+    if (this.loginState.status !== "ready") {
+      return "api key required · run openpond login";
     }
     return "enter send · /help";
   }
@@ -122,9 +113,6 @@ export class ChatWorker {
   private async persistConfig(overrides: Partial<LocalConfig> = {}): Promise<void> {
     this.config = { ...this.config, ...overrides };
     await saveConfig(this.config);
-    if (overrides.token || overrides.baseUrl || overrides.deviceCode) {
-      await saveGlobalConfig(this.config);
-    }
   }
 
   private appendLine(text: string): void {
@@ -141,64 +129,23 @@ export class ChatWorker {
     this.events.onStream("");
   }
 
-
-  private async startLogin(): Promise<void> {
-    this.loginState = { status: "pending", userCode: "", verificationUrl: "", deviceCode: "" };
-    this.emitState();
-    await this.persistConfig({ token: undefined, deviceCode: undefined });
-    try {
-      const response = await startDeviceLogin(this.baseUrl);
-      this.loginState = {
-        status: "pending",
-        userCode: response.userCode,
-        verificationUrl: response.verificationUrl,
-        deviceCode: response.deviceCode,
-      };
-      await this.persistConfig({ deviceCode: response.deviceCode });
-      this.appendLine(`login: code ${response.userCode}`);
-      this.appendLine(`login: url ${response.verificationUrl}`);
-      this.emitState();
-      this.scheduleLoginPoll();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Login failed";
-      this.loginState = { status: "error", message };
-      this.appendLine(`login error: ${message}`);
-      this.emitState();
+  private resolveConfiguredApiKey(config: LocalConfig): string | null {
+    const envApiKey = process.env.OPENPOND_API_KEY?.trim();
+    if (envApiKey) {
+      return envApiKey;
     }
-  }
 
-  private scheduleLoginPoll(): void {
-    if (this.pollingTimer) {
-      clearTimeout(this.pollingTimer);
+    const storedApiKey = config.apiKey?.trim();
+    if (storedApiKey) {
+      return storedApiKey;
     }
-    this.pollingTimer = setTimeout(() => {
-      void this.pollLogin(false);
-    }, 2000);
-  }
 
-  private async pollLogin(manual: boolean): Promise<void> {
-    if (this.loginState.status !== "pending") return;
-    if (!this.loginState.deviceCode) return;
-    try {
-      const result = await pollDeviceLogin(this.baseUrl, this.loginState.deviceCode);
-      if (result.accessToken) {
-        this.loginState = { status: "ready", token: result.accessToken };
-        await this.persistConfig({ token: result.accessToken, deviceCode: null });
-        this.appendLine("login: approved");
-        this.emitState();
-        return;
-      }
-      if (manual) {
-        this.appendLine("login: still pending");
-      }
-      this.emitState();
-      this.scheduleLoginPoll();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Login check failed";
-      if (manual) {
-        this.appendLine(`login error: ${message}`);
-      }
+    const legacyToken = config.token?.trim();
+    if (legacyToken?.startsWith("opk_")) {
+      return legacyToken;
     }
+
+    return null;
   }
 
   private runOpentoolInit(name?: string): void {
@@ -254,7 +201,7 @@ export class ChatWorker {
         }
         const token = this.token();
         if (!token) {
-          this.appendLine("login required to create app");
+          this.appendLine("api key required to create app. Run `openpond login` first.");
           return;
         }
         const result = await createLocalProject(this.baseUrl, token, name);
@@ -289,12 +236,11 @@ export class ChatWorker {
     }
 
     if (command === "login") {
-      const action = rest[0];
-      if (action === "check") {
-        await this.pollLogin(true);
+      if (this.loginState.status === "ready") {
+        this.appendLine("api key already configured");
         return;
       }
-      await this.startLogin();
+      this.appendLine("Run `openpond login` in a terminal to save an API key, then reopen this chat.");
       return;
     }
 
@@ -329,7 +275,7 @@ export class ChatWorker {
     if (command === "link") {
       const token = this.token();
       if (!token) {
-        this.appendLine("login required to link app");
+        this.appendLine("api key required to link app. Run `openpond login` first.");
         return;
       }
       const sub = rest[0];
@@ -373,7 +319,6 @@ export class ChatWorker {
       this.appendLine("/link <appId>");
       this.appendLine("/link create <name>");
       this.appendLine("/login");
-      this.appendLine("/login check");
       this.appendLine("/help");
       return;
     }
@@ -384,7 +329,7 @@ export class ChatWorker {
   private async sendMessage(text: string): Promise<void> {
     const token = this.token();
     if (!token) {
-      this.appendLine("login required");
+      this.appendLine("api key required. Run `openpond login` first.");
       return;
     }
     const isBuilder = this.chatMode === "builder";

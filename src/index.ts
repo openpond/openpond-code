@@ -111,10 +111,8 @@ export {
   listApps,
   listTemplateBranches,
   listUserTools,
-  pollDeviceLogin,
   postAgentDigest,
   resolveWorkerBaseUrl,
-  startDeviceLogin,
   submitPositionsTx,
 } from "./api";
 export {
