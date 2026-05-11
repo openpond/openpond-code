@@ -159,6 +159,7 @@ export {
   setActiveProfile,
 } from "./config";
 export type {
+  ActiveProfileSelector,
   ConfiguredProfile,
   SaveProfileApiKeyInput,
   SetActiveProfileOptions,
