@@ -242,6 +242,10 @@ export type AppRuntimeSummary = {
   asOf: string;
 };
 
+export type AppSchedulesResponse = {
+  schedules?: unknown[];
+};
+
 export type OpenPondAccountProduct = {
   id: string;
   userProductId: string;
@@ -524,6 +528,24 @@ export async function listUserTools(
     throw new Error(`Tools lookup failed: ${response.status} ${text}`);
   }
   return (await response.json()) as { tools?: unknown[] };
+}
+
+export async function listAppSchedules(
+  baseUrl: string,
+  token: string,
+  appId: string
+): Promise<AppSchedulesResponse> {
+  const response = await apiFetch(
+    baseUrl,
+    token,
+    `/apps/${encodeURIComponent(appId)}/schedules`,
+    { method: "GET" }
+  );
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Schedules lookup failed: ${response.status} ${text}`);
+  }
+  return (await response.json()) as AppSchedulesResponse;
 }
 
 export type AgentCreateRequest = {
