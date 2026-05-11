@@ -1,5 +1,11 @@
 # openpond-code
 
+## 0.2.4
+
+### Patch Changes
+
+- 4cac928: Add public account, API health, and redacted local profile config helpers.
+
 ## 0.2.3
 
 ### Patch Changes
