@@ -30,7 +30,7 @@ openpond --version
 openpond --check-update
 openpond profiles list
 openpond profiles use production
-openpond profiles save staging --api-key opk_staging_... --base-url https://staging.openpond.ai
+openpond profiles save staging --api-key opk_staging_...
 openpond account
 openpond health
 openpond --account production apps list
@@ -119,8 +119,7 @@ const profiles = await listConfiguredProfiles();
 await setActiveProfile("production");
 await saveProfileApiKey({
   handle: "staging",
-  apiKey: "opk_staging_...",
-  baseUrl: "https://staging.openpond.ai",
+  apiKey: "opk_staging_..."
 });
 
 await client.apps.agentCreate(
