@@ -1,5 +1,11 @@
 # openpond-code
 
+## 0.3.2
+
+### Patch Changes
+
+- 5c9db6b: fixed account active
+
 ## 0.3.1
 
 ### Patch Changes
