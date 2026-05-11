@@ -12,6 +12,7 @@ export type LocalAccountConfig = {
   handle: string;
   apiKey?: string;
   baseUrl?: string;
+  apiBaseUrl?: string;
   environment?: string;
   session?: LocalSessionConfig;
 };
@@ -20,6 +21,7 @@ export type LocalConfig = {
   accounts?: LocalAccountConfig[];
   activeHandle?: string;
   baseUrl?: string;
+  apiBaseUrl?: string;
   apiKey?: string;
   token?: string;
   appId?: string | null;
@@ -32,6 +34,7 @@ export type LocalConfig = {
 export type ConfiguredProfile = {
   handle: string;
   baseUrl: string | null;
+  apiBaseUrl: string | null;
   environment: string | null;
   isActive: boolean;
   hasApiKey: boolean;
@@ -48,6 +51,7 @@ export type SaveProfileApiKeyInput = {
   handle: string;
   apiKey: string;
   baseUrl?: string | null;
+  apiBaseUrl?: string | null;
   environment?: string | null;
   setActive?: boolean;
 };
@@ -63,6 +67,7 @@ const DEFAULT_ACCOUNT_HANDLE = "default";
 const ACCOUNT_SCOPED_KEYS = [
   "apiKey",
   "baseUrl",
+  "apiBaseUrl",
   "token",
   "appId",
   "conversationId",
@@ -165,6 +170,7 @@ function sanitizeAccount(value: unknown): LocalAccountConfig | null {
   const out: LocalAccountConfig = { handle };
   if (typeof input.apiKey === "string") out.apiKey = input.apiKey;
   if (typeof input.baseUrl === "string") out.baseUrl = input.baseUrl;
+  if (typeof input.apiBaseUrl === "string") out.apiBaseUrl = input.apiBaseUrl;
   if (typeof input.environment === "string") out.environment = input.environment;
   const session = sanitizeSession(input.session);
   if (session) out.session = session;
@@ -187,6 +193,7 @@ function extractLegacyAccount(raw: LocalConfig, handle: string): LocalAccountCon
   const out: LocalAccountConfig = { handle };
   if (typeof raw.apiKey === "string") out.apiKey = raw.apiKey;
   if (typeof raw.baseUrl === "string") out.baseUrl = raw.baseUrl;
+  if (typeof raw.apiBaseUrl === "string") out.apiBaseUrl = raw.apiBaseUrl;
   const session = extractLegacySession(raw);
   if (session) out.session = session;
   return out;
@@ -303,6 +310,16 @@ function applyScopedKey(
       }
       return;
     }
+    case "apiBaseUrl": {
+      if (shouldDelete) {
+        delete account.apiBaseUrl;
+        return;
+      }
+      if (typeof value === "string") {
+        account.apiBaseUrl = value;
+      }
+      return;
+    }
     case "token":
     case "appId":
     case "conversationId": {
@@ -402,6 +419,7 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Local
     activeHandle: requested,
     apiKey: account?.apiKey,
     baseUrl: account?.baseUrl,
+    apiBaseUrl: account?.apiBaseUrl,
     token: session?.token,
     appId: session?.appId,
     conversationId: session?.conversationId,
@@ -414,6 +432,7 @@ export async function listConfiguredProfiles(): Promise<ConfiguredProfile[]> {
   return (global.accounts ?? []).map((account) => ({
     handle: account.handle,
     baseUrl: normalizeBaseUrl(account.baseUrl),
+    apiBaseUrl: normalizeBaseUrl(account.apiBaseUrl),
     environment: account.environment?.trim() || null,
     isActive: Boolean(activeHandle && handleEquals(account.handle, activeHandle)),
     hasApiKey: Boolean(account.apiKey?.trim()),
@@ -450,6 +469,7 @@ export async function saveProfileApiKey(
   const handle = requireHandle(input.handle);
   const apiKey = requireApiKey(input.apiKey);
   const baseUrl = normalizeBaseUrl(input.baseUrl);
+  const apiBaseUrl = normalizeBaseUrl(input.apiBaseUrl);
   const global = await loadGlobalConfig();
   const accounts = global.accounts ?? [];
   const account = ensureAccount(accounts, handle, baseUrl);
@@ -457,6 +477,11 @@ export async function saveProfileApiKey(
   account.apiKey = apiKey;
   if (baseUrl) {
     account.baseUrl = baseUrl;
+  }
+  if (apiBaseUrl) {
+    account.apiBaseUrl = apiBaseUrl;
+  } else if (input.apiBaseUrl === null) {
+    delete account.apiBaseUrl;
   }
   if (input.environment === null) {
     delete account.environment;

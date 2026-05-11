@@ -1100,9 +1100,6 @@ export function resolveWorkerBaseUrl(baseUrl: string): string {
       if (host === "apps.openpond.live") {
         return null;
       }
-      if (host === "apps.staging.openpond.live") {
-        return null;
-      }
       if (
         host === "api.openpond.ai" ||
         host === "openpond.ai" ||
@@ -1110,9 +1107,6 @@ export function resolveWorkerBaseUrl(baseUrl: string): string {
         host === "www.openpond.live"
       ) {
         return "https://apps.openpond.live";
-      }
-      if (host === "api.staging-api.openpond.ai" || host === "staging.openpond.ai") {
-        return "https://apps.staging.openpond.live";
       }
       return null;
     })();
