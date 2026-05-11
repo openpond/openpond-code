@@ -29,6 +29,29 @@ export type LocalConfig = {
   mode?: "general" | "builder";
 };
 
+export type ConfiguredProfile = {
+  handle: string;
+  baseUrl: string | null;
+  environment: string | null;
+  isActive: boolean;
+  hasApiKey: boolean;
+  hasSessionToken: boolean;
+  sessionAppId: string | null;
+  sessionConversationId: string | null;
+};
+
+export type SetActiveProfileOptions = {
+  baseUrl?: string | null;
+};
+
+export type SaveProfileApiKeyInput = {
+  handle: string;
+  apiKey: string;
+  baseUrl?: string | null;
+  environment?: string | null;
+  setActive?: boolean;
+};
+
 export type LoadConfigOptions = {
   account?: string;
   baseUrl?: string;
@@ -77,6 +100,25 @@ function normalizeBaseUrl(value: string | undefined | null): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
   return trimmed.replace(/\/$/, "");
+}
+
+function requireHandle(value: string | undefined | null): string {
+  const handle = normalizeHandle(value);
+  if (!handle) {
+    throw new Error("profile handle must be non-empty");
+  }
+  return handle;
+}
+
+function requireApiKey(value: string | undefined | null): string {
+  if (typeof value !== "string") {
+    throw new Error("apiKey must be a non-empty string");
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error("apiKey must be a non-empty string");
+  }
+  return trimmed;
 }
 
 function handleEquals(left: string, right: string): boolean {
@@ -364,6 +406,80 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Local
     appId: session?.appId,
     conversationId: session?.conversationId,
   };
+}
+
+export async function listConfiguredProfiles(): Promise<ConfiguredProfile[]> {
+  const global = await loadGlobalConfig();
+  const activeHandle = normalizeHandle(global.activeHandle);
+  return (global.accounts ?? []).map((account) => ({
+    handle: account.handle,
+    baseUrl: normalizeBaseUrl(account.baseUrl),
+    environment: account.environment?.trim() || null,
+    isActive: Boolean(activeHandle && handleEquals(account.handle, activeHandle)),
+    hasApiKey: Boolean(account.apiKey?.trim()),
+    hasSessionToken: Boolean(account.session?.token?.trim()),
+    sessionAppId: account.session?.appId ?? null,
+    sessionConversationId: account.session?.conversationId ?? null,
+  }));
+}
+
+export async function setActiveProfile(
+  handle: string,
+  options: SetActiveProfileOptions = {}
+): Promise<ConfiguredProfile> {
+  const requestedHandle = requireHandle(handle);
+  const requestedBaseUrl = normalizeBaseUrl(options.baseUrl);
+  const global = await loadGlobalConfig();
+  const accounts = global.accounts ?? [];
+  const idxWithBase = findAccountIndex(accounts, requestedHandle, requestedBaseUrl);
+  const idx = idxWithBase !== -1 ? idxWithBase : findAccountIndex(accounts, requestedHandle);
+  if (idx === -1) {
+    throw new Error(`profile not found: ${requestedHandle}`);
+  }
+
+  global.activeHandle = accounts[idx]!.handle;
+  await writeGlobalConfig(global);
+
+  const profiles = await listConfiguredProfiles();
+  return profiles.find((profile) => profile.isActive) ?? profiles[idx]!;
+}
+
+export async function saveProfileApiKey(
+  input: SaveProfileApiKeyInput
+): Promise<ConfiguredProfile> {
+  const handle = requireHandle(input.handle);
+  const apiKey = requireApiKey(input.apiKey);
+  const baseUrl = normalizeBaseUrl(input.baseUrl);
+  const global = await loadGlobalConfig();
+  const accounts = global.accounts ?? [];
+  const account = ensureAccount(accounts, handle, baseUrl);
+
+  account.apiKey = apiKey;
+  if (baseUrl) {
+    account.baseUrl = baseUrl;
+  }
+  if (input.environment === null) {
+    delete account.environment;
+  } else if (typeof input.environment === "string" && input.environment.trim()) {
+    account.environment = input.environment.trim();
+  }
+
+  global.accounts = accounts;
+  if (input.setActive !== false) {
+    global.activeHandle = account.handle;
+  }
+  await writeGlobalConfig(global);
+
+  const profiles = await listConfiguredProfiles();
+  const saved = profiles.find((profile) => {
+    if (!handleEquals(profile.handle, account.handle)) return false;
+    if (!baseUrl) return true;
+    return normalizeBaseUrl(profile.baseUrl) === baseUrl;
+  });
+  if (!saved) {
+    throw new Error(`failed to save profile: ${handle}`);
+  }
+  return saved;
 }
 
 export async function saveConfig(next: LocalConfig): Promise<void> {
