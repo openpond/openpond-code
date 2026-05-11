@@ -17,7 +17,7 @@ Use this skill when an agent needs to create or manage OpenPond apps via the CLI
 
 ## Common workflows
 
-- Create internal repo and attach remote:
+- Create OpenPond repo and attach remote:
   - `openpond repo create --name my-repo --path .`
 - Non-interactive push (tokenized remote):
   - `openpond repo create --name my-repo --path . --token`

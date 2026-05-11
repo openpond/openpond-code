@@ -76,7 +76,7 @@ Command reference:
 - `openpond template status <handle>/<repo>`: check whether a template update is available.
 - `openpond template branches <handle>/<repo>`: list available template branches.
 - `openpond template update <handle>/<repo> [--env preview|production]`: deploy the latest template commit.
-- `openpond repo create --name <name> [--path <dir>] [--empty|--opentool] [--deploy-on-push]`: create an internal repo and attach the git remote.
+- `openpond repo create --name <name> [--path <dir>] [--empty|--opentool] [--deploy-on-push]`: create an OpenPond repo and attach the git remote.
 - `openpond repo push [--path <dir>] [--branch <branch>]`: push the current git branch using a tokenized remote (non-interactive, restores origin after push).
 - `openpond apps list [--handle <handle>] [--refresh]`: list apps for your account, optionally filtered by handle.
 - `openpond apps tools`: list tools for your account (public API).

@@ -1,4 +1,11 @@
 import type { ChatRequestBody } from "./types";
+import {
+  DEFAULT_OPENPOND_API_BASE_URL,
+  DEFAULT_OPENPOND_WEB_BASE_URL,
+} from "./urls";
+
+const DEFAULT_OPENPOND_API_HOST = new URL(DEFAULT_OPENPOND_API_BASE_URL).hostname;
+const DEFAULT_OPENPOND_WEB_HOST = new URL(DEFAULT_OPENPOND_WEB_BASE_URL).hostname;
 
 export type ToolManifest = {
   version?: string;
@@ -1123,8 +1130,8 @@ export function resolveWorkerBaseUrl(baseUrl: string): string {
         return null;
       }
       if (
-        host === "api.openpond.ai" ||
-        host === "openpond.ai" ||
+        host === DEFAULT_OPENPOND_API_HOST ||
+        host === DEFAULT_OPENPOND_WEB_HOST ||
         host === "openpond.live" ||
         host === "www.openpond.live"
       ) {

@@ -13,6 +13,7 @@ export type LocalAccountConfig = {
   apiKey?: string;
   baseUrl?: string;
   apiBaseUrl?: string;
+  chatApiBaseUrl?: string;
   environment?: string;
   session?: LocalSessionConfig;
 };
@@ -27,6 +28,7 @@ export type LocalConfig = {
   activeProfile?: ActiveProfileSelector;
   baseUrl?: string;
   apiBaseUrl?: string;
+  chatApiBaseUrl?: string;
   apiKey?: string;
   token?: string;
   appId?: string | null;
@@ -40,6 +42,7 @@ export type ConfiguredProfile = {
   handle: string;
   baseUrl: string | null;
   apiBaseUrl: string | null;
+  chatApiBaseUrl: string | null;
   environment: string | null;
   isActive: boolean;
   hasApiKey: boolean;
@@ -57,6 +60,7 @@ export type SaveProfileApiKeyInput = {
   apiKey: string;
   baseUrl?: string | null;
   apiBaseUrl?: string | null;
+  chatApiBaseUrl?: string | null;
   environment?: string | null;
   setActive?: boolean;
 };
@@ -73,6 +77,7 @@ const ACCOUNT_SCOPED_KEYS = [
   "apiKey",
   "baseUrl",
   "apiBaseUrl",
+  "chatApiBaseUrl",
   "token",
   "appId",
   "conversationId",
@@ -231,6 +236,7 @@ function sanitizeAccount(value: unknown): LocalAccountConfig | null {
   if (typeof input.apiKey === "string") out.apiKey = input.apiKey;
   if (typeof input.baseUrl === "string") out.baseUrl = input.baseUrl;
   if (typeof input.apiBaseUrl === "string") out.apiBaseUrl = input.apiBaseUrl;
+  if (typeof input.chatApiBaseUrl === "string") out.chatApiBaseUrl = input.chatApiBaseUrl;
   if (typeof input.environment === "string") out.environment = input.environment;
   const session = sanitizeSession(input.session);
   if (session) out.session = session;
@@ -254,6 +260,7 @@ function extractLegacyAccount(raw: LocalConfig, handle: string): LocalAccountCon
   if (typeof raw.apiKey === "string") out.apiKey = raw.apiKey;
   if (typeof raw.baseUrl === "string") out.baseUrl = raw.baseUrl;
   if (typeof raw.apiBaseUrl === "string") out.apiBaseUrl = raw.apiBaseUrl;
+  if (typeof raw.chatApiBaseUrl === "string") out.chatApiBaseUrl = raw.chatApiBaseUrl;
   const session = extractLegacySession(raw);
   if (session) out.session = session;
   return out;
@@ -395,6 +402,16 @@ function applyScopedKey(
       }
       return;
     }
+    case "chatApiBaseUrl": {
+      if (shouldDelete) {
+        delete account.chatApiBaseUrl;
+        return;
+      }
+      if (typeof value === "string") {
+        account.chatApiBaseUrl = value;
+      }
+      return;
+    }
     case "token":
     case "appId":
     case "conversationId": {
@@ -496,6 +513,7 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Local
     apiKey: account?.apiKey,
     baseUrl: account?.baseUrl,
     apiBaseUrl: account?.apiBaseUrl,
+    chatApiBaseUrl: account?.chatApiBaseUrl,
     token: session?.token,
     appId: session?.appId,
     conversationId: session?.conversationId,
@@ -509,6 +527,7 @@ export async function listConfiguredProfiles(): Promise<ConfiguredProfile[]> {
     handle: account.handle,
     baseUrl: normalizeBaseUrl(account.baseUrl),
     apiBaseUrl: normalizeBaseUrl(account.apiBaseUrl),
+    chatApiBaseUrl: normalizeBaseUrl(account.chatApiBaseUrl),
     environment: account.environment?.trim() || null,
     isActive: Boolean(activeProfile && accountMatchesSelector(account, activeProfile)),
     hasApiKey: Boolean(account.apiKey?.trim()),
@@ -549,6 +568,7 @@ export async function saveProfileApiKey(
   const apiKey = requireApiKey(input.apiKey);
   const baseUrl = normalizeBaseUrl(input.baseUrl);
   const apiBaseUrl = normalizeBaseUrl(input.apiBaseUrl);
+  const chatApiBaseUrl = normalizeBaseUrl(input.chatApiBaseUrl);
   const global = await loadGlobalConfig();
   const accounts = global.accounts ?? [];
   const account = ensureAccount(accounts, handle, baseUrl);
@@ -561,6 +581,11 @@ export async function saveProfileApiKey(
     account.apiBaseUrl = apiBaseUrl;
   } else if (input.apiBaseUrl === null) {
     delete account.apiBaseUrl;
+  }
+  if (chatApiBaseUrl) {
+    account.chatApiBaseUrl = chatApiBaseUrl;
+  } else if (input.chatApiBaseUrl === null) {
+    delete account.chatApiBaseUrl;
   }
   if (input.environment === null) {
     delete account.environment;

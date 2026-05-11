@@ -51,6 +51,13 @@ import {
   type LocalConfig,
 } from "./config";
 import { consumeStream, formatStreamItem } from "./stream";
+import {
+  DEFAULT_OPENPOND_API_BASE_URL,
+  DEFAULT_OPENPOND_WEB_BASE_URL,
+} from "./urls";
+
+const DEFAULT_OPENPOND_API_HOST = new URL(DEFAULT_OPENPOND_API_BASE_URL).hostname;
+const DEFAULT_OPENPOND_WEB_HOST = new URL(DEFAULT_OPENPOND_WEB_BASE_URL).hostname;
 
 type Command =
   | "login"
@@ -196,9 +203,26 @@ function resolveApiBaseUrlOption(options: Record<string, string | boolean>): str
   return trimmed.replace(/\/$/, "");
 }
 
+function resolveChatApiBaseUrlOption(options: Record<string, string | boolean>): string | null {
+  const raw =
+    typeof options.chatApiBaseUrl === "string"
+      ? options.chatApiBaseUrl
+      : typeof options.chatApiBaseurl === "string"
+        ? options.chatApiBaseurl
+        : typeof options.chatApiUrl === "string"
+          ? options.chatApiUrl
+          : null;
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === "true") {
+    throw new Error("chat-api-base-url must be a non-empty value");
+  }
+  return trimmed.replace(/\/$/, "");
+}
+
 function resolveBaseUrl(config: LocalConfig): string {
   const envBase = process.env.OPENPOND_BASE_URL;
-  const base = envBase || config.baseUrl || "https://openpond.ai";
+  const base = envBase || config.baseUrl || DEFAULT_OPENPOND_WEB_BASE_URL;
   return base.replace(/\/$/, "");
 }
 
@@ -208,10 +232,10 @@ function mapUiBaseToApiBase(baseUrl: string | undefined): string | null {
   try {
     const url = new URL(trimmed);
     const host = url.hostname.toLowerCase();
-    if (host === "openpond.ai" || host === "openpond.live" || host === "www.openpond.live") {
-      return "https://api.openpond.ai";
+    if (host === DEFAULT_OPENPOND_WEB_HOST || host === "openpond.live" || host === "www.openpond.live") {
+      return DEFAULT_OPENPOND_API_BASE_URL;
     }
-    if (host === "api.openpond.ai" || host.startsWith("api.")) {
+    if (host === DEFAULT_OPENPOND_API_HOST || host.startsWith("api.")) {
       return trimmed;
     }
   } catch {
@@ -224,7 +248,7 @@ function resolvePublicApiBaseUrl(config?: LocalConfig): string {
   const envBase = process.env.OPENPOND_API_URL;
   const configuredApiBase = config?.apiBaseUrl?.trim();
   const mapped = mapUiBaseToApiBase(process.env.OPENPOND_BASE_URL || config?.baseUrl);
-  const base = envBase || configuredApiBase || mapped || "https://api.openpond.ai";
+  const base = envBase || configuredApiBase || mapped || DEFAULT_OPENPOND_API_BASE_URL;
   return base.replace(/\/$/, "");
 }
 
@@ -294,7 +318,7 @@ function resolveTemplateEnvironment(value: string | undefined): "preview" | "pro
   throw new Error("env must be preview or production");
 }
 
-const UI_API_KEY_URL = "https://openpond.ai/settings/api-keys";
+const UI_API_KEY_URL = `${DEFAULT_OPENPOND_WEB_BASE_URL}/settings/api-keys`;
 
 async function promptForApiKey(): Promise<string> {
   console.log("Open the OpenPond UI to create an API key:");
@@ -627,7 +651,7 @@ function printHelp(): void {
   console.log("  openpond login [--api-key <key>]");
   console.log("  openpond profiles list");
   console.log("  openpond profiles use <name>");
-  console.log("  openpond profiles save <name> --api-key <key> [--base-url <url>]");
+  console.log("  openpond profiles save <name> --api-key <key> [--base-url <url>] [--api-base-url <url>] [--chat-api-base-url <url>]");
   console.log("  openpond account");
   console.log("  openpond health");
   console.log("  openpond tool list <handle>/<repo>");
@@ -673,10 +697,11 @@ function printHelp(): void {
   console.log("  --account <name> (alias: --profile <name>)");
   console.log("  --base-url <url> (alias: --baseurl)");
   console.log("  --api-base-url <url> (API endpoint for this profile)");
+  console.log("  --chat-api-base-url <url> (hosted chat/model endpoint for this profile)");
   console.log("");
   console.log("Env:");
   console.log(
-    "  OPENPOND_API_KEY, OPENPOND_ACCOUNT, OPENPOND_BASE_URL, OPENPOND_API_URL, OPENPOND_TOOL_URL"
+    "  OPENPOND_API_KEY, OPENPOND_ACCOUNT, OPENPOND_BASE_URL, OPENPOND_API_URL, OPENPOND_CHAT_API_URL, OPENPOND_TOOL_URL"
   );
 }
 
@@ -701,6 +726,7 @@ async function runLogin(options: Record<string, string | boolean>): Promise<void
     apiKey,
     baseUrl,
     apiBaseUrl: config.apiBaseUrl,
+    chatApiBaseUrl: config.chatApiBaseUrl,
     setActive: true,
   });
   console.log("saved api key to ~/.openpond/config.json");
@@ -732,7 +758,7 @@ async function runProfiles(
   if (subcommand === "save") {
     const handle = rest[1];
     if (!handle) {
-      throw new Error("usage: profiles save <name> --api-key <key> [--base-url <url>]");
+      throw new Error("usage: profiles save <name> --api-key <key> [--base-url <url>] [--api-base-url <url>] [--chat-api-base-url <url>]");
     }
     const rawApiKey =
       typeof options.apiKey === "string"
@@ -752,6 +778,7 @@ async function runProfiles(
       apiKey,
       baseUrl: resolveBaseUrlOption(options),
       apiBaseUrl: resolveApiBaseUrlOption(options),
+      chatApiBaseUrl: resolveChatApiBaseUrlOption(options),
       environment,
       setActive: true,
     });
