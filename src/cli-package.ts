@@ -318,7 +318,7 @@ async function ensureApiKey(config: LocalConfig, baseUrl: string): Promise<strin
   const existing = resolveApiKey(config);
   if (existing) return existing;
   const apiKey = await promptForApiKey();
-  await saveGlobalConfig({ apiKey, baseUrl, activeHandle: config.activeHandle });
+  await saveGlobalConfig({ apiKey, baseUrl, activeProfile: config.activeProfile });
   console.log("saved api key to ~/.openpond/config.json");
   return apiKey;
 }
@@ -697,7 +697,7 @@ async function runLogin(options: Record<string, string | boolean>): Promise<void
     console.log("warning: API keys usually start with opk_.");
   }
   await saveProfileApiKey({
-    handle: config.activeHandle || "default",
+    handle: config.activeProfile?.handle || "default",
     apiKey,
     baseUrl,
     apiBaseUrl: config.apiBaseUrl,

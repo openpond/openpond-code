@@ -17,9 +17,14 @@ export type LocalAccountConfig = {
   session?: LocalSessionConfig;
 };
 
+export type ActiveProfileSelector = {
+  handle: string;
+  baseUrl?: string | null;
+};
+
 export type LocalConfig = {
   accounts?: LocalAccountConfig[];
-  activeHandle?: string;
+  activeProfile?: ActiveProfileSelector;
   baseUrl?: string;
   apiBaseUrl?: string;
   apiKey?: string;
@@ -143,6 +148,61 @@ function findAccountIndex(
   });
 }
 
+function selectorFromAccount(account: LocalAccountConfig): ActiveProfileSelector {
+  const baseUrl = normalizeBaseUrl(account.baseUrl);
+  return baseUrl ? { handle: account.handle, baseUrl } : { handle: account.handle };
+}
+
+function sanitizeActiveProfile(value: unknown): ActiveProfileSelector | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  const handle = normalizeHandle(
+    typeof input.handle === "string" ? input.handle : undefined
+  );
+  if (!handle) return null;
+
+  const baseUrl = normalizeBaseUrl(
+    typeof input.baseUrl === "string" ? input.baseUrl : undefined
+  );
+  return baseUrl ? { handle, baseUrl } : { handle };
+}
+
+function accountMatchesSelector(
+  account: LocalAccountConfig,
+  selector: ActiveProfileSelector
+): boolean {
+  if (!handleEquals(account.handle, selector.handle)) return false;
+  const selectorBaseUrl = normalizeBaseUrl(selector.baseUrl);
+  if (selectorBaseUrl) {
+    return normalizeBaseUrl(account.baseUrl) === selectorBaseUrl;
+  }
+  return !normalizeBaseUrl(account.baseUrl);
+}
+
+function findAccountIndexForSelector(
+  accounts: LocalAccountConfig[],
+  selector: ActiveProfileSelector,
+  options: { requireUnambiguous?: boolean } = {}
+): number {
+  const normalizedBaseUrl = normalizeBaseUrl(selector.baseUrl);
+  if (normalizedBaseUrl) {
+    return findAccountIndex(accounts, selector.handle, normalizedBaseUrl);
+  }
+
+  const noBaseIdx = accounts.findIndex((account) => accountMatchesSelector(account, selector));
+  if (noBaseIdx !== -1) return noBaseIdx;
+
+  const matches = accounts
+    .map((account, index) => ({ account, index }))
+    .filter(({ account }) => handleEquals(account.handle, selector.handle));
+  if (matches.length > 1 && options.requireUnambiguous) {
+    throw new Error(
+      `multiple profiles found for ${selector.handle}; pass --base-url to select one`
+    );
+  }
+  return matches[0]?.index ?? -1;
+}
+
 function sanitizeSession(value: unknown): LocalSessionConfig | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
@@ -221,35 +281,46 @@ function normalizeGlobalConfig(raw: LocalConfig): LocalConfig {
 
   if (accounts.length === 0) {
     const legacyHandle =
-      normalizeHandle(raw.activeHandle) || DEFAULT_ACCOUNT_HANDLE;
+      sanitizeActiveProfile(raw.activeProfile)?.handle || DEFAULT_ACCOUNT_HANDLE;
     accounts.push(extractLegacyAccount(raw, legacyHandle));
   }
 
-  const requested = normalizeHandle(raw.activeHandle);
-  const resolvedHandle =
-    requested && findAccountIndex(accounts, requested) !== -1
-      ? accounts[findAccountIndex(accounts, requested)]!.handle
-      : accounts[0]!.handle;
+  const requested = sanitizeActiveProfile(raw.activeProfile);
+  const activeIdx = requested ? findAccountIndexForSelector(accounts, requested) : -1;
+  const activeAccount = accounts[activeIdx === -1 ? 0 : activeIdx]!;
 
   normalized.accounts = accounts;
-  normalized.activeHandle = resolvedHandle;
+  normalized.activeProfile = selectorFromAccount(activeAccount);
   return normalized;
 }
 
-function resolveRequestedHandle(
+function resolveRequestedProfile(
   global: LocalConfig,
-  explicitAccount?: string
-): string {
+  explicitAccount?: string,
+  explicitBaseUrl?: string | null
+): ActiveProfileSelector {
   const accounts = global.accounts ?? [];
-  const requested =
-    normalizeHandle(explicitAccount) ||
-    normalizeHandle(process.env.OPENPOND_ACCOUNT) ||
-    normalizeHandle(global.activeHandle) ||
-    accounts[0]?.handle ||
-    DEFAULT_ACCOUNT_HANDLE;
+  const requestedBaseUrl = normalizeBaseUrl(explicitBaseUrl ?? process.env.OPENPOND_BASE_URL);
+  const explicit = normalizeHandle(explicitAccount);
+  if (explicit) {
+    return requestedBaseUrl ? { handle: explicit, baseUrl: requestedBaseUrl } : { handle: explicit };
+  }
 
-  const idx = findAccountIndex(accounts, requested);
-  return idx === -1 ? requested : accounts[idx]!.handle;
+  const envAccount = normalizeHandle(process.env.OPENPOND_ACCOUNT);
+  if (envAccount) {
+    return requestedBaseUrl
+      ? { handle: envAccount, baseUrl: requestedBaseUrl }
+      : { handle: envAccount };
+  }
+
+  const activeProfile = sanitizeActiveProfile(global.activeProfile);
+  if (activeProfile) {
+    return requestedBaseUrl
+      ? { handle: activeProfile.handle, baseUrl: requestedBaseUrl }
+      : activeProfile;
+  }
+
+  return accounts[0] ? selectorFromAccount(accounts[0]) : { handle: DEFAULT_ACCOUNT_HANDLE };
 }
 
 function ensureAccount(
@@ -258,14 +329,18 @@ function ensureAccount(
   baseUrl?: string | null
 ): LocalAccountConfig {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
-  const idx = findAccountIndex(accounts, handle, normalizedBaseUrl);
-  if (idx !== -1) {
-    return accounts[idx]!;
-  }
-  if (!normalizedBaseUrl) {
-    const firstByHandle = findAccountIndex(accounts, handle);
-    if (firstByHandle !== -1) {
-      return accounts[firstByHandle]!;
+  if (normalizedBaseUrl) {
+    const idx = findAccountIndex(accounts, handle, normalizedBaseUrl);
+    if (idx !== -1) {
+      return accounts[idx]!;
+    }
+  } else {
+    const matches = accounts.filter((account) => handleEquals(account.handle, handle));
+    if (matches.length > 1) {
+      throw new Error(`multiple profiles found for ${handle}; pass --base-url to select one`);
+    }
+    if (matches.length === 1) {
+      return matches[0]!;
     }
   }
   const next: LocalAccountConfig = { handle };
@@ -347,19 +422,19 @@ function applyAccountPatch(
   if (!hasScopedPatch) return false;
 
   const accounts = global.accounts ?? [];
-  const handle = resolveRequestedHandle(global, source.activeHandle);
+  const selector = sanitizeActiveProfile(source.activeProfile) ?? resolveRequestedProfile(global);
   const requestedBaseUrl = normalizeBaseUrl(
     hasOwn(source, "baseUrl")
       ? (source.baseUrl ?? null)
-      : process.env.OPENPOND_BASE_URL
+      : (selector.baseUrl ?? process.env.OPENPOND_BASE_URL)
   );
-  const account = ensureAccount(accounts, handle, requestedBaseUrl);
+  const account = ensureAccount(accounts, selector.handle, requestedBaseUrl);
   for (const key of ACCOUNT_SCOPED_KEYS) {
     if (!hasOwn(source, key)) continue;
     applyScopedKey(account, key, (source as Record<string, unknown>)[key], options);
   }
   global.accounts = accounts;
-  global.activeHandle = handle;
+  global.activeProfile = selectorFromAccount(account);
   return true;
 }
 
@@ -385,9 +460,14 @@ function applyTopLevelPatch(global: LocalConfig, source: LocalConfig): void {
       delete global.mode;
     }
   }
-  if (typeof source.activeHandle === "string" && source.activeHandle.trim().length > 0) {
-    const requested = resolveRequestedHandle(global, source.activeHandle);
-    global.activeHandle = requested;
+  if (hasOwn(source, "activeProfile")) {
+    const selector = sanitizeActiveProfile(source.activeProfile);
+    if (selector) {
+      const idx = findAccountIndexForSelector(global.accounts ?? [], selector);
+      global.activeProfile = idx === -1 ? selector : selectorFromAccount((global.accounts ?? [])[idx]!);
+    } else if (source.activeProfile === null) {
+      delete global.activeProfile;
+    }
   }
 }
 
@@ -406,17 +486,13 @@ export async function loadGlobalConfig(): Promise<LocalConfig> {
 export async function loadConfig(options: LoadConfigOptions = {}): Promise<LocalConfig> {
   const global = await loadGlobalConfig();
   const accounts = global.accounts ?? [];
-  const requested = resolveRequestedHandle(global, options.account);
-  const requestedBaseUrl = normalizeBaseUrl(
-    options.baseUrl ?? process.env.OPENPOND_BASE_URL
-  );
-  const idxWithBase = findAccountIndex(accounts, requested, requestedBaseUrl);
-  const idx = idxWithBase !== -1 ? idxWithBase : findAccountIndex(accounts, requested);
+  const requested = resolveRequestedProfile(global, options.account, options.baseUrl);
+  const idx = findAccountIndexForSelector(accounts, requested, { requireUnambiguous: true });
   const account = idx === -1 ? null : accounts[idx]!;
   const session = account?.session;
   return {
     ...global,
-    activeHandle: requested,
+    activeProfile: account ? selectorFromAccount(account) : requested,
     apiKey: account?.apiKey,
     baseUrl: account?.baseUrl,
     apiBaseUrl: account?.apiBaseUrl,
@@ -428,13 +504,13 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Local
 
 export async function listConfiguredProfiles(): Promise<ConfiguredProfile[]> {
   const global = await loadGlobalConfig();
-  const activeHandle = normalizeHandle(global.activeHandle);
+  const activeProfile = sanitizeActiveProfile(global.activeProfile);
   return (global.accounts ?? []).map((account) => ({
     handle: account.handle,
     baseUrl: normalizeBaseUrl(account.baseUrl),
     apiBaseUrl: normalizeBaseUrl(account.apiBaseUrl),
     environment: account.environment?.trim() || null,
-    isActive: Boolean(activeHandle && handleEquals(account.handle, activeHandle)),
+    isActive: Boolean(activeProfile && accountMatchesSelector(account, activeProfile)),
     hasApiKey: Boolean(account.apiKey?.trim()),
     hasSessionToken: Boolean(account.session?.token?.trim()),
     sessionAppId: account.session?.appId ?? null,
@@ -450,13 +526,16 @@ export async function setActiveProfile(
   const requestedBaseUrl = normalizeBaseUrl(options.baseUrl);
   const global = await loadGlobalConfig();
   const accounts = global.accounts ?? [];
-  const idxWithBase = findAccountIndex(accounts, requestedHandle, requestedBaseUrl);
-  const idx = idxWithBase !== -1 ? idxWithBase : findAccountIndex(accounts, requestedHandle);
+  const idx = findAccountIndexForSelector(
+    accounts,
+    requestedBaseUrl ? { handle: requestedHandle, baseUrl: requestedBaseUrl } : { handle: requestedHandle },
+    { requireUnambiguous: true }
+  );
   if (idx === -1) {
     throw new Error(`profile not found: ${requestedHandle}`);
   }
 
-  global.activeHandle = accounts[idx]!.handle;
+  global.activeProfile = selectorFromAccount(accounts[idx]!);
   await writeGlobalConfig(global);
 
   const profiles = await listConfiguredProfiles();
@@ -491,7 +570,7 @@ export async function saveProfileApiKey(
 
   global.accounts = accounts;
   if (input.setActive !== false) {
-    global.activeHandle = account.handle;
+    global.activeProfile = selectorFromAccount(account);
   }
   await writeGlobalConfig(global);
 

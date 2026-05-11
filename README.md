@@ -30,7 +30,7 @@ openpond --version
 openpond --check-update
 openpond profiles list
 openpond profiles use production
-openpond profiles save staging --api-key opk_staging_...
+openpond profiles save secondary --api-key opk_...
 openpond account
 openpond health
 openpond --account production apps list
@@ -57,7 +57,7 @@ openpond opentool init --dir .
 Global account selection:
 
 - `--account <name>` (alias `--profile <name>`) selects which stored account/API key to use.
-- `--base-url <url>` (alias `--baseurl`) selects the account entry matching that base URL when duplicate handles exist (for example, staging vs production).
+- `--base-url <url>` (alias `--baseurl`) selects the account entry matching that base URL when duplicate handles exist.
 - `OPENPOND_ACCOUNT=<name>` sets the default selected account for a shell/session.
 - If omitted, CLI uses the last active stored account.
 
@@ -116,10 +116,11 @@ const performance = await client.apps.performance({ appId: "app_123" });
 const repo = await client.repo.create({ name: "my-repo", repoInit: "empty" });
 
 const profiles = await listConfiguredProfiles();
-await setActiveProfile("production");
+await setActiveProfile("0xglu", { baseUrl: "https://openpond.ai" });
 await saveProfileApiKey({
-  handle: "staging",
-  apiKey: "opk_staging_..."
+  handle: "secondary",
+  apiKey: "opk_...",
+  baseUrl: "https://openpond.ai",
 });
 
 await client.apps.agentCreate(
