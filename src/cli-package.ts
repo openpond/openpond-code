@@ -181,6 +181,21 @@ function resolveBaseUrlOption(options: Record<string, string | boolean>): string
   return trimmed.replace(/\/$/, "");
 }
 
+function resolveApiBaseUrlOption(options: Record<string, string | boolean>): string | null {
+  const raw =
+    typeof options.apiBaseUrl === "string"
+      ? options.apiBaseUrl
+      : typeof options.apiBaseurl === "string"
+        ? options.apiBaseurl
+        : null;
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === "true") {
+    throw new Error("api-base-url must be a non-empty value");
+  }
+  return trimmed.replace(/\/$/, "");
+}
+
 function resolveBaseUrl(config: LocalConfig): string {
   const envBase = process.env.OPENPOND_BASE_URL;
   const base = envBase || config.baseUrl || "https://openpond.ai";
@@ -193,11 +208,11 @@ function mapUiBaseToApiBase(baseUrl: string | undefined): string | null {
   try {
     const url = new URL(trimmed);
     const host = url.hostname.toLowerCase();
-    if (host === "staging.openpond.ai") {
-      return "https://api.staging-api.openpond.ai";
-    }
     if (host === "openpond.ai" || host === "openpond.live" || host === "www.openpond.live") {
       return "https://api.openpond.ai";
+    }
+    if (host === "api.openpond.ai" || host.startsWith("api.")) {
+      return trimmed;
     }
   } catch {
     return null;
@@ -207,8 +222,9 @@ function mapUiBaseToApiBase(baseUrl: string | undefined): string | null {
 
 function resolvePublicApiBaseUrl(config?: LocalConfig): string {
   const envBase = process.env.OPENPOND_API_URL;
+  const configuredApiBase = config?.apiBaseUrl?.trim();
   const mapped = mapUiBaseToApiBase(process.env.OPENPOND_BASE_URL || config?.baseUrl);
-  const base = envBase || mapped || "https://api.openpond.ai";
+  const base = envBase || configuredApiBase || mapped || "https://api.openpond.ai";
   return base.replace(/\/$/, "");
 }
 
@@ -656,6 +672,7 @@ function printHelp(): void {
   console.log("Global options:");
   console.log("  --account <name> (alias: --profile <name>)");
   console.log("  --base-url <url> (alias: --baseurl)");
+  console.log("  --api-base-url <url> (API endpoint for this profile)");
   console.log("");
   console.log("Env:");
   console.log(
@@ -683,6 +700,7 @@ async function runLogin(options: Record<string, string | boolean>): Promise<void
     handle: config.activeHandle || "default",
     apiKey,
     baseUrl,
+    apiBaseUrl: config.apiBaseUrl,
     setActive: true,
   });
   console.log("saved api key to ~/.openpond/config.json");
@@ -733,6 +751,7 @@ async function runProfiles(
       handle,
       apiKey,
       baseUrl: resolveBaseUrlOption(options),
+      apiBaseUrl: resolveApiBaseUrlOption(options),
       environment,
       setActive: true,
     });
