@@ -1,5 +1,12 @@
 # openpond-code
 
+## 0.3.1
+
+### Patch Changes
+
+- 32ae02a: api base url
+- 32ae02a: Add profile-specific API base URL config and remove hardcoded non-production endpoint mappings from the CLI/runtime bundle.
+
 ## 0.3.0
 
 ### Minor Changes
