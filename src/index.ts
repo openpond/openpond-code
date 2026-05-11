@@ -84,6 +84,17 @@ export type {
   ToolExecuteRequest,
   ToolExecuteResponse,
 } from "./api";
+import {
+  resolveHostedChatApiBaseUrl,
+  listHostedModels,
+  sendHostedChatTurn,
+  streamHostedChatTurn,
+} from "./hosted-chat";
+import {
+  DEFAULT_OPENPOND_API_BASE_URL,
+  DEFAULT_OPENPOND_CHAT_API_BASE_URL,
+  DEFAULT_OPENPOND_WEB_BASE_URL,
+} from "./urls";
 export type {
   ChatRequestBody,
   ResponseItem,
@@ -93,6 +104,18 @@ export type {
   ToolOutputItem,
   UsageInfo,
 } from "./types";
+export type {
+  HostedChatCompletion,
+  HostedChatMessage,
+  HostedChatRequestOptions,
+  HostedChatRole,
+  HostedChatStreamDelta,
+  HostedChatUsage,
+  HostedChatApiBaseUrlOptions,
+  HostedModel,
+  HostedModelsRequestOptions,
+  HostedModelsResponse,
+} from "./hosted-chat";
 export type {
   Bar as IndicatorBar,
   BollingerResult,
@@ -134,6 +157,17 @@ export {
   submitPositionsTx,
 } from "./api";
 export {
+  DEFAULT_OPENPOND_API_BASE_URL,
+  DEFAULT_OPENPOND_CHAT_API_BASE_URL,
+  DEFAULT_OPENPOND_WEB_BASE_URL,
+} from "./urls";
+export {
+  listHostedModels,
+  resolveHostedChatApiBaseUrl,
+  sendHostedChatTurn,
+  streamHostedChatTurn,
+} from "./hosted-chat";
+export {
   computeAtr,
   computeBollinger,
   computeEma,
@@ -174,6 +208,7 @@ export type OpenPondClientOptions = {
   apiKey?: string;
   baseUrl?: string;
   apiUrl?: string;
+  chatApiUrl?: string;
   toolUrl?: string;
   cacheTtlMs?: number;
   useCache?: boolean;
@@ -211,11 +246,21 @@ export type AgentCreateStreamResult = {
 export type OpenPondClient = {
   baseUrl: string;
   apiUrl: string;
+  chatApiUrl: string;
   toolUrl: string;
   apiKey: string;
   account: {
     get: () => Promise<OpenPondAccountResponse>;
     health: () => Promise<OpenPondApiHealth>;
+  };
+  chat: {
+    models: () => Promise<import("./hosted-chat").HostedModelsResponse>;
+    send: (
+      input: Omit<import("./hosted-chat").HostedChatRequestOptions, "apiBaseUrl" | "token">
+    ) => Promise<import("./hosted-chat").HostedChatCompletion>;
+    stream: (
+      input: Omit<import("./hosted-chat").HostedChatRequestOptions, "apiBaseUrl" | "token">
+    ) => AsyncGenerator<import("./hosted-chat").HostedChatStreamDelta, void, unknown>;
   };
   tool: {
     list: (target: string, options?: ToolListOptions) => Promise<ToolListResult>;
@@ -367,23 +412,27 @@ export type PositionsTxOptions = {
   query?: Record<string, string>;
 };
 
-const DEFAULT_BASE_URL = "https://openpond.ai";
-const DEFAULT_API_URL = "https://api.openpond.ai";
-
 function resolveUrl(value: string): string {
   return value.replace(/\/$/, "");
 }
 
 function resolveBaseUrl(options: OpenPondClientOptions): string {
   const envBase = process.env.OPENPOND_BASE_URL;
-  const base = options.baseUrl || envBase || DEFAULT_BASE_URL;
+  const base = options.baseUrl || envBase || DEFAULT_OPENPOND_WEB_BASE_URL;
   return resolveUrl(base.trim());
 }
 
 function resolveApiUrl(options: OpenPondClientOptions): string {
   const envBase = process.env.OPENPOND_API_URL;
-  const base = options.apiUrl || envBase || DEFAULT_API_URL;
+  const base = options.apiUrl || envBase || DEFAULT_OPENPOND_API_BASE_URL;
   return resolveUrl(base.trim());
+}
+
+function resolveChatApiUrl(options: OpenPondClientOptions, apiUrl: string): string {
+  return resolveHostedChatApiBaseUrl({
+    apiBaseUrl: apiUrl,
+    chatApiBaseUrl: options.chatApiUrl,
+  });
 }
 
 function resolveToolUrl(options: OpenPondClientOptions, baseUrl: string): string {
@@ -591,6 +640,7 @@ export function createClient(options: OpenPondClientOptions): OpenPondClient {
   const apiKey = resolveApiKey(options);
   const baseUrl = resolveBaseUrl(options);
   const apiUrl = resolveApiUrl(options);
+  const chatApiUrl = resolveChatApiUrl(options, apiUrl);
   const toolUrl = resolveToolUrl(options, baseUrl);
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   const useCache = options.useCache !== false;
@@ -628,11 +678,19 @@ export function createClient(options: OpenPondClientOptions): OpenPondClient {
   return {
     baseUrl,
     apiUrl,
+    chatApiUrl,
     toolUrl,
     apiKey,
     account: {
       get: async () => getOpenPondAccount(apiUrl, apiKey),
       health: async () => checkOpenPondApiHealth(apiUrl, apiKey),
+    },
+    chat: {
+      models: async () => listHostedModels({ apiBaseUrl: chatApiUrl, token: apiKey }),
+      send: async (input) =>
+        sendHostedChatTurn({ ...input, apiBaseUrl: chatApiUrl, token: apiKey }),
+      stream: (input) =>
+        streamHostedChatTurn({ ...input, apiBaseUrl: chatApiUrl, token: apiKey }),
     },
     tool: {
       list: async (target, options) => {
