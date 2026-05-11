@@ -242,6 +242,73 @@ export type AppRuntimeSummary = {
   asOf: string;
 };
 
+export type OpenPondAccountProduct = {
+  id: string;
+  userProductId: string;
+  openPondProductId: string | null;
+  name: string;
+  description: string[] | null;
+  type: "subscription" | "credit_pack" | string;
+  status: "active" | "expired" | "cancelled" | string;
+  startDate: string | null;
+  endDate: string | null;
+  dailyInputTokens: number | null;
+  dailyOutputTokens: number | null;
+  dailyMessageLimit: number | null;
+  monthlyInputTokens: number | null;
+  monthlyOutputTokens: number | null;
+  monthlyCost: string | null;
+  credits: string | null;
+  price: string | null;
+  currency: string;
+  duration: number | null;
+  restrictedModels: string[] | null;
+  gatewayEntitlements: unknown | null;
+  duckHoldings: number | null;
+  isActive: boolean | null;
+};
+
+export type OpenPondAccount = {
+  id: string;
+  email: string | null;
+  name: string | null;
+  handle: string | null;
+  image: string | null;
+  timezone: string | null;
+  turnkeyWalletAddress: string | null;
+  turnkeyOperatingWalletAddress: string | null;
+  isAdmin: boolean;
+  isVerified: boolean;
+  dailyAgentAppId: string | null;
+  dailyAgentDeploymentId: string | null;
+  credits: string;
+};
+
+export type OpenPondAccountResponse = {
+  account: OpenPondAccount;
+  products: OpenPondAccountProduct[];
+  asOf: string;
+};
+
+export type OpenPondApiHealthResponse = {
+  status: string;
+  service?: string;
+  timestamp?: string;
+  version?: string | null;
+};
+
+export type OpenPondApiHealth = {
+  reachable: boolean;
+  authenticated: boolean | null;
+  apiBase: string;
+  latencyMs: number;
+  status: number | null;
+  service: string | null;
+  checkedAt: string;
+  account?: OpenPondAccount | null;
+  error?: string;
+};
+
 export type AssistantMode = "plan" | "performance";
 
 export type AssistantRunRequest = {
@@ -529,6 +596,72 @@ export async function getAppRuntimeSummary(
     throw new Error(`Summary lookup failed: ${response.status} ${text}`);
   }
   return (await response.json()) as AppRuntimeSummary;
+}
+
+export async function getOpenPondAccount(
+  baseUrl: string,
+  token: string
+): Promise<OpenPondAccountResponse> {
+  const response = await apiFetch(baseUrl, token, "/account", {
+    method: "GET",
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Account lookup failed: ${response.status} ${text}`);
+  }
+  return (await response.json()) as OpenPondAccountResponse;
+}
+
+export async function checkOpenPondApiHealth(
+  baseUrl: string,
+  token?: string | null
+): Promise<OpenPondApiHealth> {
+  const checkedAt = new Date().toISOString();
+  const started = Date.now();
+  const normalizedBase = baseUrl.replace(/\/$/, "");
+  try {
+    const response = await fetch(`${normalizedBase}/health`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+    const latencyMs = Date.now() - started;
+    const payload = (await response.json().catch(() => ({}))) as Partial<OpenPondApiHealthResponse>;
+    let authenticated: boolean | null = null;
+    let account: OpenPondAccount | null = null;
+
+    if (token?.trim()) {
+      try {
+        const accountPayload = await getOpenPondAccount(normalizedBase, token);
+        authenticated = true;
+        account = accountPayload.account;
+      } catch {
+        authenticated = false;
+      }
+    }
+
+    return {
+      reachable: response.ok,
+      authenticated,
+      apiBase: normalizedBase,
+      latencyMs,
+      status: response.status,
+      service: typeof payload.service === "string" ? payload.service : null,
+      checkedAt,
+      account,
+      ...(response.ok ? {} : { error: response.statusText || `HTTP ${response.status}` }),
+    };
+  } catch (error) {
+    return {
+      reachable: false,
+      authenticated: token?.trim() ? false : null,
+      apiBase: normalizedBase,
+      latencyMs: Date.now() - started,
+      status: null,
+      service: null,
+      checkedAt,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export async function runAssistantMode(

@@ -1,4 +1,5 @@
 import {
+  checkOpenPondApiHealth,
   getAppRuntimeSummary,
   createAgentFromPrompt,
   createRepo,
@@ -13,6 +14,7 @@ import {
   getDeploymentLogs,
   getDeploymentStatus,
   getLatestDeploymentForApp,
+  getOpenPondAccount,
   getTemplateStatus,
   getUserPerformance,
   listTemplateBranches,
@@ -31,6 +33,11 @@ import {
   type CreateRepoResponse,
   type DeploymentDetail,
   type DeploymentLogEntry,
+  type OpenPondAccount,
+  type OpenPondAccountProduct,
+  type OpenPondAccountResponse,
+  type OpenPondApiHealth,
+  type OpenPondApiHealthResponse,
   type TemplateBranchesResponse,
   type TemplateDeployLatestRequest,
   type TemplateDeployLatestResponse,
@@ -62,6 +69,11 @@ export type {
   CreateRepoResponse,
   DeploymentDetail,
   DeploymentLogEntry,
+  OpenPondAccount,
+  OpenPondAccountProduct,
+  OpenPondAccountResponse,
+  OpenPondApiHealth,
+  OpenPondApiHealthResponse,
   TemplateBranchesResponse,
   TemplateDeployLatestRequest,
   TemplateDeployLatestResponse,
@@ -88,6 +100,7 @@ export type {
 } from "./indicators";
 export {
   apiFetch,
+  checkOpenPondApiHealth,
   getAppRuntimeSummary,
   commitFiles,
   createAgentFromPrompt,
@@ -105,6 +118,7 @@ export {
   getDeploymentLogs,
   getDeploymentStatus,
   getLatestDeploymentForApp,
+  getOpenPondAccount,
   getTemplateStatus,
   getUserPerformance,
   runAssistantMode,
@@ -136,10 +150,18 @@ export {
 } from "./cache";
 export {
   getConfigPath,
+  listConfiguredProfiles,
   loadConfig,
   loadGlobalConfig,
   saveConfig,
   saveGlobalConfig,
+  saveProfileApiKey,
+  setActiveProfile,
+} from "./config";
+export type {
+  ConfiguredProfile,
+  SaveProfileApiKeyInput,
+  SetActiveProfileOptions,
 } from "./config";
 export { consumeStream, formatStreamItem, normalizeDataFrames } from "./stream";
 
@@ -186,6 +208,10 @@ export type OpenPondClient = {
   apiUrl: string;
   toolUrl: string;
   apiKey: string;
+  account: {
+    get: () => Promise<OpenPondAccountResponse>;
+    health: () => Promise<OpenPondApiHealth>;
+  };
   tool: {
     list: (target: string, options?: ToolListOptions) => Promise<ToolListResult>;
     run: (
@@ -594,6 +620,10 @@ export function createClient(options: OpenPondClientOptions): OpenPondClient {
     apiUrl,
     toolUrl,
     apiKey,
+    account: {
+      get: async () => getOpenPondAccount(apiUrl, apiKey),
+      health: async () => checkOpenPondApiHealth(apiUrl, apiKey),
+    },
     tool: {
       list: async (target, options) => {
         const { app } = await resolveAppTarget({

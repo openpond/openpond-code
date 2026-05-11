@@ -1,8 +1,6 @@
 # openpond-code
 
-API-key CLI + local TUI client for OpenPond.
-
-## API key CLI (openpond/op)
+OpenPond CLI
 
 Install:
 
@@ -30,6 +28,11 @@ Commands:
 ```bash
 openpond --version
 openpond --check-update
+openpond profiles list
+openpond profiles use production
+openpond profiles save staging --api-key opk_staging_... --base-url https://staging.openpond.ai
+openpond account
+openpond health
 openpond --account production apps list
 openpond tool list <handle>/<repo>
 openpond tool run <handle>/<repo> <tool> --body '{"foo":"bar"}'
@@ -62,6 +65,11 @@ Command reference:
 
 - `openpond login`: prompt for API key and save to `~/.openpond/config.json`.
 - `openpond login --api-key <key>`: save the API key without prompting.
+- `openpond profiles list`: list redacted local profiles from `~/.openpond/config.json`.
+- `openpond profiles use <name> [--base-url <url>]`: switch the active local profile.
+- `openpond profiles save <name> --api-key <key> [--base-url <url>] [--environment <name>]`: save or update a local profile API key.
+- `openpond account`: fetch current account/profile fields and active products for the selected API key.
+- `openpond health`: check public API reachability and selected API-key auth health when a key is configured.
 - `openpond tool list <handle>/<repo>`: list tools for the latest deployment.
 - `openpond tool run <handle>/<repo> <tool> [--body <json>] [--method <METHOD>]`: run a tool on the latest deployment.
 - `openpond deploy watch <handle>/<repo> [--branch <branch>]`: stream deployment logs for the latest deployment.
@@ -86,7 +94,12 @@ Command reference:
 Programmatic API that mirrors the CLI command surface:
 
 ```ts
-import { createClient } from "openpond-code";
+import {
+  createClient,
+  listConfiguredProfiles,
+  saveProfileApiKey,
+  setActiveProfile,
+} from "openpond-code";
 
 const client = createClient({ apiKey: process.env.OPENPOND_API_KEY! });
 
@@ -96,9 +109,19 @@ const result = await client.tool.run("handle/repo", "myTool", {
 });
 
 const apps = await client.apps.list();
+const account = await client.account.get();
+const health = await client.account.health();
 const accountTools = await client.apps.tools();
 const performance = await client.apps.performance({ appId: "app_123" });
 const repo = await client.repo.create({ name: "my-repo", repoInit: "empty" });
+
+const profiles = await listConfiguredProfiles();
+await setActiveProfile("production");
+await saveProfileApiKey({
+  handle: "staging",
+  apiKey: "opk_staging_...",
+  baseUrl: "https://staging.openpond.ai",
+});
 
 await client.apps.agentCreate(
   { prompt: "Build a daily digest agent" },
@@ -117,10 +140,6 @@ via `OPENPOND_API_URL` and `OPENPOND_TOOL_URL`.
 
 Examples live in `examples`.
 
-## Local TUI
-
-Minimal terminal client for OpenPond chat + history. This is a standalone folder intended
-to be extracted into its own repo later.
 
 ## Run
 

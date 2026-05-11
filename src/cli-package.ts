@@ -7,12 +7,14 @@ import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 
 import {
+  checkOpenPondApiHealth,
   getAppRuntimeSummary,
   executeHostedTool,
   getDeploymentDetail,
   getDeploymentLogs,
   getDeploymentStatus,
   getLatestDeploymentForApp,
+  getOpenPondAccount,
   getUserPerformance,
   getTemplateStatus,
   listApps,
@@ -40,11 +42,21 @@ import {
   setCachedApps,
   setCachedTools,
 } from "./cache";
-import { loadConfig, saveGlobalConfig, type LocalConfig } from "./config";
+import {
+  listConfiguredProfiles,
+  loadConfig,
+  saveGlobalConfig,
+  saveProfileApiKey,
+  setActiveProfile,
+  type LocalConfig,
+} from "./config";
 import { consumeStream, formatStreamItem } from "./stream";
 
 type Command =
   | "login"
+  | "profiles"
+  | "account"
+  | "health"
   | "tool"
   | "deploy"
   | "backtest"
@@ -597,6 +609,11 @@ function printHelp(): void {
   console.log("  openpond --version");
   console.log("  openpond --check-update");
   console.log("  openpond login [--api-key <key>]");
+  console.log("  openpond profiles list");
+  console.log("  openpond profiles use <name>");
+  console.log("  openpond profiles save <name> --api-key <key> [--base-url <url>]");
+  console.log("  openpond account");
+  console.log("  openpond health");
   console.log("  openpond tool list <handle>/<repo>");
   console.log("  openpond tool run <handle>/<repo> <tool> [--body <json>] [--method <METHOD>]");
   console.log(
@@ -662,8 +679,85 @@ async function runLogin(options: Record<string, string | boolean>): Promise<void
   if (!apiKey.startsWith("opk_")) {
     console.log("warning: API keys usually start with opk_.");
   }
-  await saveGlobalConfig({ apiKey, baseUrl, activeHandle: config.activeHandle });
+  await saveProfileApiKey({
+    handle: config.activeHandle || "default",
+    apiKey,
+    baseUrl,
+    setActive: true,
+  });
   console.log("saved api key to ~/.openpond/config.json");
+}
+
+async function runProfiles(
+  options: Record<string, string | boolean>,
+  rest: string[]
+): Promise<void> {
+  const subcommand = rest[0] || "list";
+  if (subcommand === "list") {
+    const profiles = await listConfiguredProfiles();
+    console.log(JSON.stringify({ profiles }, null, 2));
+    return;
+  }
+
+  if (subcommand === "use") {
+    const handle = rest[1];
+    if (!handle) {
+      throw new Error("usage: profiles use <name> [--base-url <url>]");
+    }
+    const profile = await setActiveProfile(handle, {
+      baseUrl: resolveBaseUrlOption(options),
+    });
+    console.log(JSON.stringify({ profile }, null, 2));
+    return;
+  }
+
+  if (subcommand === "save") {
+    const handle = rest[1];
+    if (!handle) {
+      throw new Error("usage: profiles save <name> --api-key <key> [--base-url <url>]");
+    }
+    const rawApiKey =
+      typeof options.apiKey === "string"
+        ? options.apiKey
+        : typeof options.key === "string"
+          ? options.key
+          : null;
+    const apiKey = rawApiKey ? rawApiKey.trim() : await promptForApiKey();
+    const environment =
+      typeof options.environment === "string"
+        ? options.environment
+        : typeof options.env === "string"
+          ? options.env
+          : undefined;
+    const profile = await saveProfileApiKey({
+      handle,
+      apiKey,
+      baseUrl: resolveBaseUrlOption(options),
+      environment,
+      setActive: true,
+    });
+    console.log(JSON.stringify({ profile }, null, 2));
+    return;
+  }
+
+  throw new Error("usage: profiles <list|use|save> [args]");
+}
+
+async function runAccount(options: Record<string, string | boolean>): Promise<void> {
+  const config = await loadConfig();
+  const uiBase = resolveBaseUrl(config);
+  const apiBase = resolvePublicApiBaseUrl(config);
+  const apiKey = await ensureApiKey(config, uiBase);
+  const account = await getOpenPondAccount(apiBase, apiKey);
+  console.log(JSON.stringify(account, null, 2));
+}
+
+async function runHealth(_options: Record<string, string | boolean>): Promise<void> {
+  const config = await loadConfig();
+  const apiBase = resolvePublicApiBaseUrl(config);
+  const apiKey = resolveApiKey(config);
+  const health = await checkOpenPondApiHealth(apiBase, apiKey);
+  console.log(JSON.stringify(health, null, 2));
 }
 
 async function runToolList(options: Record<string, string | boolean>, target: string) {
@@ -1746,6 +1840,21 @@ async function main() {
 
   if (command === "login") {
     await runLogin(options);
+    return;
+  }
+
+  if (command === "profiles") {
+    await runProfiles(options, rest);
+    return;
+  }
+
+  if (command === "account") {
+    await runAccount(options);
+    return;
+  }
+
+  if (command === "health") {
+    await runHealth(options);
     return;
   }
 
