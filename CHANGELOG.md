@@ -1,5 +1,11 @@
 # openpond-code
 
+## 0.3.3
+
+### Patch Changes
+
+- 37b3a33: fixed missing listappschedles
+
 ## 0.3.2
 
 ### Patch Changes
