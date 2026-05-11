@@ -1,5 +1,11 @@
 # openpond-code
 
+## 0.3.4
+
+### Patch Changes
+
+- 36f0422: added chat
+
 ## 0.3.3
 
 ### Patch Changes
