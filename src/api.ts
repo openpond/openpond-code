@@ -1,4 +1,136 @@
 import type { ChatRequestBody } from "./types";
+import { apiFetch, readApiJson } from "./api-core";
+export { apiFetch } from "./api-core";
+import type {
+  ToolManifest,
+  CreateLocalProjectInput,
+  CreateRepoRequest,
+  CreateRepoResponse,
+  HeadlessAppRequest,
+  HeadlessAppResponse,
+  HeadlessAppsResponse,
+  TemplateStatusResponse,
+  TemplateBranchesResponse,
+  TemplateDeployLatestRequest,
+  TemplateDeployLatestResponse,
+  AppEnvironmentUpdateRequest,
+  AppEnvironmentUpdateResponse,
+  AppEnvironmentGetResponse,
+  AppScheduleSummary,
+  AppListItem,
+  AppRuntimeSummary,
+  ScheduleExecutionStatus,
+  AppSchedule,
+  AppSchedulesResponse,
+  OpenToolRecipeDomain,
+  OpenToolRecipeSummary,
+  OpenToolRecipeListRequest,
+  OpenToolRecipeListResponse,
+  OpenToolRecipeSearchRequest,
+  OpenToolRecipeSearchResponse,
+  OpenToolRecipeGetRequest,
+  OpenToolRecipe,
+  OpenToolRulesGetRequest,
+  OpenToolRulesGetResponse,
+  ScheduleToggleRequest,
+  ScheduleToggleResult,
+  ScheduleRunNowRequest,
+  ScheduleRunNowResponse,
+  ScheduleDeleteResponse,
+  PromotePreviewToProductionRequest,
+  PromotePreviewToProductionResponse,
+  StartAppLifecycleRequest,
+  StartAppLifecycleResponse,
+  ScheduleExecutionLog,
+  ScheduleExecutionLogsResponse,
+  AppExecutionDeployment,
+  AppExecutionToolRun,
+  AppExecutionTimelineResponse,
+  OpenPondAccountProduct,
+  OpenPondAccount,
+  OpenPondAccountResponse,
+  OpenPondApiHealthResponse,
+  OpenPondApiHealth,
+  AssistantMode,
+  AssistantRunRequest,
+  AssistantRunResponse,
+  AgentCreateRequest,
+  BacktestRunRequest,
+  DeploymentLogEntry,
+  DeploymentDetail,
+  ToolExecuteRequest,
+  ToolExecuteResponse,
+} from "./api-types";
+export {
+  commitFiles,
+  deployApp,
+  getDeploymentDetail,
+  getDeploymentLogs,
+  getDeploymentStatus,
+  getLatestDeploymentForApp,
+  promotePreviewToProduction,
+  startAppLifecycle,
+} from "./api-deployments";
+export type {
+  ToolManifest,
+  CreateLocalProjectInput,
+  CreateRepoRequest,
+  CreateRepoResponse,
+  HeadlessAppRequest,
+  HeadlessAppResponse,
+  HeadlessAppsResponse,
+  TemplateStatusResponse,
+  TemplateBranchesResponse,
+  TemplateDeployLatestRequest,
+  TemplateDeployLatestResponse,
+  AppEnvironmentUpdateRequest,
+  AppEnvironmentUpdateResponse,
+  AppEnvironmentGetResponse,
+  AppScheduleSummary,
+  AppListItem,
+  AppRuntimeSummary,
+  ScheduleExecutionStatus,
+  AppSchedule,
+  AppSchedulesResponse,
+  OpenToolRecipeDomain,
+  OpenToolRecipeSummary,
+  OpenToolRecipeListRequest,
+  OpenToolRecipeListResponse,
+  OpenToolRecipeSearchRequest,
+  OpenToolRecipeSearchResponse,
+  OpenToolRecipeGetRequest,
+  OpenToolRecipe,
+  OpenToolRulesGetRequest,
+  OpenToolRulesGetResponse,
+  ScheduleToggleRequest,
+  ScheduleToggleResult,
+  ScheduleRunNowRequest,
+  ScheduleRunNowResponse,
+  ScheduleDeleteResponse,
+  PromotePreviewToProductionRequest,
+  PromotePreviewToProductionResponse,
+  StartAppLifecycleRequest,
+  StartAppLifecycleResponse,
+  ScheduleExecutionLog,
+  ScheduleExecutionLogsResponse,
+  AppExecutionDeployment,
+  AppExecutionToolRun,
+  AppExecutionTimelineResponse,
+  OpenPondAccountProduct,
+  OpenPondAccount,
+  OpenPondAccountResponse,
+  OpenPondApiHealthResponse,
+  OpenPondApiHealth,
+  AssistantMode,
+  AssistantRunRequest,
+  AssistantRunResponse,
+  AgentCreateRequest,
+  BacktestRunRequest,
+  DeploymentLogEntry,
+  DeploymentDetail,
+  ToolExecuteRequest,
+  ToolExecuteResponse,
+} from "./api-types";
 import {
   DEFAULT_OPENPOND_API_BASE_URL,
   DEFAULT_OPENPOND_WEB_BASE_URL,
@@ -6,44 +138,6 @@ import {
 
 const DEFAULT_OPENPOND_API_HOST = new URL(DEFAULT_OPENPOND_API_BASE_URL).hostname;
 const DEFAULT_OPENPOND_WEB_HOST = new URL(DEFAULT_OPENPOND_WEB_BASE_URL).hostname;
-
-export type ToolManifest = {
-  version?: string;
-  tools: Array<{
-    type: "function";
-    function: {
-      name: string;
-      description?: string;
-      parameters?: unknown;
-    };
-  }>;
-};
-
-export async function apiFetch(
-  baseUrl: string,
-  token: string | null,
-  path: string,
-  init?: RequestInit
-): Promise<Response> {
-  const headers = new Headers(init?.headers || {});
-  headers.set("Content-Type", "application/json");
-  const apiKey = process.env.OPENPOND_API_KEY;
-  const trimmedToken = token?.trim() || "";
-  const tokenIsApiKey = trimmedToken.startsWith("opk_");
-  const effectiveApiKey = apiKey || (tokenIsApiKey ? trimmedToken : null);
-  if (effectiveApiKey && !headers.has("openpond-api-key")) {
-    headers.set("openpond-api-key", effectiveApiKey);
-  }
-  if (token) {
-    headers.set("Authorization", tokenIsApiKey ? `ApiKey ${trimmedToken}` : `Bearer ${token}`);
-  } else if (apiKey && !headers.has("Authorization")) {
-    headers.set("Authorization", `ApiKey ${apiKey}`);
-  }
-  return fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers,
-  });
-}
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   const parts = token.split(".");
@@ -62,287 +156,23 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   }
 }
 
-export type CreateLocalProjectInput = {
-  name: string;
-  templateRepoUrl?: string;
-  templateBranch?: string;
-  envVars?: Record<string, string>;
-};
-
-export type CreateRepoRequest = {
-  name: string;
-  description?: string;
-  repoInit?: "opentool" | "empty";
-  templateRepoUrl?: string;
-  templateBranch?: string;
-  envVars?: Record<string, string>;
-  deployOnPush?: boolean;
-  autoScheduleMigration?: boolean;
-};
-
-export type CreateRepoResponse = {
-  appId: string;
-  gitOwner?: string | null;
-  gitRepo?: string | null;
-  gitHost?: string | null;
-  repoUrl?: string | null;
-  defaultBranch?: string;
-};
-
-export type HeadlessAppRequest = {
-  name?: string;
-  description?: string;
-  templateRepoUrl?: string;
-  templateBranch?: string;
-  templateName?: string;
-  envVars?: Record<string, string>;
-  visibility?: "private" | "public";
-};
-
-export type HeadlessAppResponse = {
-  status: "ok" | "error";
-  appId?: string;
-  deploymentId?: string;
-  conversationId?: string;
-  error?: string;
-};
-
-export type HeadlessAppsResponse = {
-  items: HeadlessAppResponse[];
-};
-
-export type TemplateStatusResponse = {
-  templateRepoUrl: string;
-  templateBranch: string;
-  remoteSha: string;
-  lastAppliedSha: string | null;
-  updateAvailable: boolean;
-};
-
-export type TemplateBranchesResponse = {
-  templateRepoUrl: string;
-  templateBranch: string;
-  defaultBranch: string;
-  branches: string[];
-};
-
-export type TemplateDeployLatestRequest = {
-  environment: "preview" | "production";
-};
-
-export type TemplateDeployLatestResponse = {
-  deploymentId: string;
-  version: number;
-  templateCommitSha: string;
-};
-
-export type AppEnvironmentUpdateRequest = {
-  envVars: Record<string, string>;
-};
-
-export type AppEnvironmentUpdateResponse = {
-  environment: Record<string, string>;
-};
-
-export type AppEnvironmentGetResponse = {
-  environment: Record<string, string>;
-};
-
-export type AppListItem = {
-  id: string;
-  name: string;
-  description: string | null;
-  appType: string | null;
-  visibility: "public" | "private";
-  gitOwner: string | null;
-  gitRepo: string | null;
-  gitProvider: string | null;
-  gitHost: string | null;
-  defaultBranch: string | null;
-  createdAt: string;
-  updatedAt: string;
-  teamId: string | null;
-  teamName: string | null;
-  handle: string | null;
-  repo: string | null;
-  latestDeployment: {
-    id: string;
-    status: string;
-    deploymentDomain: string | null;
-    internalUrl: string | null;
-    createdAt: string;
-    isProduction: boolean | null;
-    gitBranch: string | null;
-  } | null;
-};
-
-export type AppRuntimeSummary = {
-  app: {
-    appId: string;
-    name: string;
-    description: string | null;
-    teamId: string;
-    templateRepoUrl: string | null;
-    templateBranch: string | null;
-    initialPromptSnapshot: string | null;
-  };
-  runtime: {
-    latestDeployment: {
-      id: string;
-      status: string;
-      isProduction: boolean | null;
-      createdAt: string;
-    } | null;
-    schedules: {
-      total: number;
-      enabled: number;
-      disabled: number;
-    };
-    notifications: {
-      scheduleEmailsEnabled: boolean;
-      scheduleTweetsEnabled: boolean;
-    };
-    toolNotifyEmail: {
-      notifyEmailEnabledCount: number;
-      toolsConfiguredCount: number;
-    };
-    lastScheduleRun: {
-      id: string;
-      status: string;
-      executionTime: string;
-      scheduleName: string;
-      errorMessage: string | null;
-    } | null;
-    lastToolRun: {
-      id: string;
-      status: string;
-      endpoint: string;
-      toolName: string | null;
-      method: string | null;
-      createdAt: string;
-      executionTime: number | null;
-      error: string | null;
-    } | null;
-  };
-  wallet: {
-    personalWalletAddress: string | null;
-    operatingWalletAddress: string | null;
-    arbitrum: {
-      eth: { raw: string; formatted: string } | null;
-      usdc: { raw: string; formatted: string } | null;
-    };
-    hyperliquid: {
-      mainnet: {
-        accountValue: number | null;
-        withdrawable: number | null;
-        totalMarginUsed: number | null;
-        error?: string;
-      };
-      testnet: {
-        accountValue: number | null;
-        withdrawable: number | null;
-        totalMarginUsed: number | null;
-        error?: string;
-      };
-    };
-  };
-  asOf: string;
-};
-
-export type AppSchedulesResponse = {
-  schedules?: unknown[];
-};
-
-export type OpenPondAccountProduct = {
-  id: string;
-  userProductId: string;
-  openPondProductId: string | null;
-  name: string;
-  description: string[] | null;
-  type: "subscription" | "credit_pack" | string;
-  status: "active" | "expired" | "cancelled" | string;
-  startDate: string | null;
-  endDate: string | null;
-  dailyInputTokens: number | null;
-  dailyOutputTokens: number | null;
-  dailyMessageLimit: number | null;
-  monthlyInputTokens: number | null;
-  monthlyOutputTokens: number | null;
-  monthlyCost: string | null;
-  credits: string | null;
-  price: string | null;
-  currency: string;
-  duration: number | null;
-  restrictedModels: string[] | null;
-  gatewayEntitlements: unknown | null;
-  duckHoldings: number | null;
-  isActive: boolean | null;
-};
-
-export type OpenPondAccount = {
-  id: string;
-  email: string | null;
-  name: string | null;
-  handle: string | null;
-  image: string | null;
-  timezone: string | null;
-  turnkeyWalletAddress: string | null;
-  turnkeyOperatingWalletAddress: string | null;
-  isAdmin: boolean;
-  isVerified: boolean;
-  dailyAgentAppId: string | null;
-  dailyAgentDeploymentId: string | null;
-  credits: string;
-};
-
-export type OpenPondAccountResponse = {
-  account: OpenPondAccount;
-  products: OpenPondAccountProduct[];
-  asOf: string;
-};
-
-export type OpenPondApiHealthResponse = {
-  status: string;
-  service?: string;
-  timestamp?: string;
-  version?: string | null;
-};
-
-export type OpenPondApiHealth = {
-  reachable: boolean;
-  authenticated: boolean | null;
-  apiBase: string;
-  latencyMs: number;
-  status: number | null;
-  service: string | null;
-  checkedAt: string;
-  account?: OpenPondAccount | null;
-  error?: string;
-};
-
-export type AssistantMode = "plan" | "performance";
-
-export type AssistantRunRequest = {
-  appId: string;
-  mode: AssistantMode;
-  prompt: string;
-};
-
-export type AssistantRunResponse = {
-  ok: boolean;
-  mode: AssistantMode;
-  conversationId: string;
-  response: string;
-};
-
 export async function listApps(
   apiBase: string,
   token: string,
-  options?: { handle?: string }
+  options?: { handle?: string; limit?: number; offset?: number; includeScheduled?: boolean }
 ): Promise<AppListItem[]> {
   const params = new URLSearchParams();
   if (options?.handle) {
     params.set("handle", options.handle);
+  }
+  if (typeof options?.limit === "number" && Number.isFinite(options.limit)) {
+    params.set("limit", String(Math.max(1, Math.floor(options.limit))));
+  }
+  if (typeof options?.offset === "number" && Number.isFinite(options.offset)) {
+    params.set("offset", String(Math.max(0, Math.floor(options.offset))));
+  }
+  if (typeof options?.includeScheduled === "boolean") {
+    params.set("includeScheduled", options.includeScheduled ? "true" : "false");
   }
   const query = params.toString();
   const response = await apiFetch(
@@ -552,23 +382,246 @@ export async function listAppSchedules(
     const text = await response.text().catch(() => "");
     throw new Error(`Schedules lookup failed: ${response.status} ${text}`);
   }
-  return (await response.json()) as AppSchedulesResponse;
+  const payload = (await response.json().catch(() => ({}))) as Partial<AppSchedulesResponse>;
+  return { schedules: Array.isArray(payload.schedules) ? payload.schedules : [] };
 }
 
-export type AgentCreateRequest = {
-  prompt: string;
-  template?: {
-    name?: string;
-    description?: string;
-    templateRepoUrl?: string;
-    templateBranch?: string;
-    envVars?: Record<string, string>;
+export async function listOpenToolRecipes(
+  baseUrl: string,
+  token: string,
+  input: OpenToolRecipeListRequest = {}
+): Promise<OpenToolRecipeListResponse> {
+  const params = new URLSearchParams();
+  if (input.domain) params.set("domain", input.domain);
+  if (input.opentoolVersion) params.set("opentoolVersion", input.opentoolVersion);
+  if (typeof input.limit === "number") params.set("limit", String(input.limit));
+  for (const tag of input.tags ?? []) params.append("tag", tag);
+  const query = params.toString();
+  const response = await apiFetch(baseUrl, token, `/v1/opentool/recipes${query ? `?${query}` : ""}`, {
+    method: "GET",
+  });
+  return readApiJson<OpenToolRecipeListResponse>(response, "OpenTool recipe list");
+}
+
+export async function searchOpenToolRecipes(
+  baseUrl: string,
+  token: string,
+  input: OpenToolRecipeSearchRequest
+): Promise<OpenToolRecipeSearchResponse> {
+  const response = await apiFetch(baseUrl, token, "/v1/opentool/recipes/search", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return readApiJson<OpenToolRecipeSearchResponse>(response, "OpenTool recipe search");
+}
+
+export async function getOpenToolRecipe(
+  baseUrl: string,
+  token: string,
+  input: OpenToolRecipeGetRequest
+): Promise<OpenToolRecipe> {
+  const params = new URLSearchParams();
+  if (typeof input.includeExamples === "boolean") params.set("includeExamples", String(input.includeExamples));
+  if (typeof input.includeTests === "boolean") params.set("includeTests", String(input.includeTests));
+  if (input.opentoolVersion) params.set("opentoolVersion", input.opentoolVersion);
+  const query = params.toString();
+  const response = await apiFetch(
+    baseUrl,
+    token,
+    `/v1/opentool/recipes/${encodeURIComponent(input.id)}${query ? `?${query}` : ""}`,
+    { method: "GET" }
+  );
+  return readApiJson<OpenToolRecipe>(response, "OpenTool recipe get");
+}
+
+export async function getOpenToolRules(
+  baseUrl: string,
+  token: string,
+  input: OpenToolRulesGetRequest
+): Promise<OpenToolRulesGetResponse> {
+  const response = await apiFetch(baseUrl, token, "/v1/opentool/rules", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return readApiJson<OpenToolRulesGetResponse>(response, "OpenTool rules get");
+}
+
+function buildLimitQuery(limit?: number): string {
+  const params = new URLSearchParams();
+  if (typeof limit === "number" && Number.isFinite(limit)) {
+    params.set("limit", String(Math.max(1, Math.floor(limit))));
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+function normalizeScheduleExecutionLogs(payload: unknown): ScheduleExecutionLog[] {
+  if (Array.isArray(payload)) {
+    return payload as ScheduleExecutionLog[];
+  }
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+  const record = payload as {
+    logs?: unknown;
+    runs?: unknown;
+    scheduleRuns?: unknown;
+    items?: unknown;
   };
-  deployEnvironment?: "preview" | "production";
-  deployDisabled?: boolean;
-  autoDeployOnFinish?: boolean;
-  streamDeployLogs?: boolean;
-};
+  if (Array.isArray(record.logs)) {
+    return record.logs as ScheduleExecutionLog[];
+  }
+  if (Array.isArray(record.runs)) {
+    return record.runs as ScheduleExecutionLog[];
+  }
+  if (Array.isArray(record.scheduleRuns)) {
+    return record.scheduleRuns as ScheduleExecutionLog[];
+  }
+  if (Array.isArray(record.items)) {
+    return record.items as ScheduleExecutionLog[];
+  }
+  return [];
+}
+
+export async function startAppSchedules(
+  baseUrl: string,
+  token: string,
+  appId: string,
+  input?: ScheduleToggleRequest
+): Promise<ScheduleToggleResult> {
+  const body = {
+    ...(input?.preferredScheduleId ? { preferredScheduleId: input.preferredScheduleId } : {}),
+    ...(input?.scheduleId ? { scheduleId: input.scheduleId } : {}),
+    ...(input?.startAt ? { startAt: input.startAt } : {}),
+    ...(input && "endAt" in input ? { endAt: input.endAt ?? null } : {}),
+  };
+  const response = await apiFetch(
+    baseUrl,
+    token,
+    `/apps/${encodeURIComponent(appId)}/schedules/start`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    }
+  );
+  return readApiJson<ScheduleToggleResult>(response, "Schedule start");
+}
+
+export async function stopAppSchedules(
+  baseUrl: string,
+  token: string,
+  appId: string
+): Promise<ScheduleToggleResult> {
+  const response = await apiFetch(
+    baseUrl,
+    token,
+    `/apps/${encodeURIComponent(appId)}/schedules/stop`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    }
+  );
+  return readApiJson<ScheduleToggleResult>(response, "Schedule stop");
+}
+
+export async function stopCurrentAppSchedules(
+  baseUrl: string,
+  token: string
+): Promise<ScheduleToggleResult> {
+  const response = await apiFetch(baseUrl, token, "/apps/schedules/current/stop", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return readApiJson<ScheduleToggleResult>(response, "Current schedule stop");
+}
+
+export async function runScheduleNow(
+  baseUrl: string,
+  token: string,
+  input: ScheduleRunNowRequest
+): Promise<ScheduleRunNowResponse> {
+  const response = await apiFetch(baseUrl, token, "/v1/schedules/run", {
+    method: "POST",
+    body: JSON.stringify({ scheduleId: input.scheduleId }),
+  });
+  return readApiJson<ScheduleRunNowResponse>(response, "Schedule run");
+}
+
+export async function deleteOrArchiveSchedule(
+  baseUrl: string,
+  token: string,
+  appId: string,
+  scheduleId: string
+): Promise<ScheduleDeleteResponse> {
+  const response = await apiFetch(
+    baseUrl,
+    token,
+    `/apps/${encodeURIComponent(appId)}/schedules/${encodeURIComponent(scheduleId)}`,
+    { method: "DELETE" }
+  );
+  return readApiJson<ScheduleDeleteResponse>(response, "Schedule delete");
+}
+
+export async function listScheduleExecutionLogs(
+  baseUrl: string,
+  token: string,
+  scheduleId: string,
+  options?: { limit?: number }
+): Promise<ScheduleExecutionLogsResponse> {
+  const response = await apiFetch(
+    baseUrl,
+    token,
+    `/v1/schedules/${encodeURIComponent(scheduleId)}/execution-logs${buildLimitQuery(options?.limit)}`,
+    { method: "GET" }
+  );
+  const payload = await readApiJson<unknown>(response, "Schedule execution logs");
+  return { logs: normalizeScheduleExecutionLogs(payload) };
+}
+
+export async function listDeploymentScheduleExecutionLogs(
+  baseUrl: string,
+  token: string,
+  deploymentId: string,
+  options?: { limit?: number }
+): Promise<ScheduleExecutionLogsResponse> {
+  const response = await apiFetch(
+    baseUrl,
+    token,
+    `/v1/deployments/${encodeURIComponent(deploymentId)}/schedule-execution-logs${buildLimitQuery(options?.limit)}`,
+    { method: "GET" }
+  );
+  const payload = await readApiJson<unknown>(response, "Deployment schedule execution logs");
+  return { logs: normalizeScheduleExecutionLogs(payload) };
+}
+
+export async function getScheduleExecutionLog(
+  baseUrl: string,
+  token: string,
+  runId: string
+): Promise<ScheduleExecutionLog> {
+  const response = await apiFetch(
+    baseUrl,
+    token,
+    `/v1/schedule-execution-logs/${encodeURIComponent(runId)}`,
+    { method: "GET" }
+  );
+  return readApiJson<ScheduleExecutionLog>(response, "Schedule execution log");
+}
+
+export async function getAppExecutionTimeline(
+  baseUrl: string,
+  token: string,
+  appId: string,
+  options?: { limit?: number }
+): Promise<AppExecutionTimelineResponse> {
+  const response = await apiFetch(
+    baseUrl,
+    token,
+    `/v1/apps/${encodeURIComponent(appId)}/execution-timeline${buildLimitQuery(options?.limit)}`,
+    { method: "GET" }
+  );
+  return readApiJson<AppExecutionTimelineResponse>(response, "App execution timeline");
+}
 
 export async function createAgentFromPrompt(
   baseUrl: string,
@@ -794,23 +847,6 @@ export async function submitPositionsTx(
   return (await response.json()) as unknown;
 }
 
-export type BacktestRunRequest = {
-  appId: string;
-  deploymentId: string;
-  toolName?: string;
-  method?: "GET" | "POST" | "PUT" | "DELETE";
-  symbol?: string;
-  timeframeStart?: string;
-  timeframeEnd?: string;
-  lookbackDays?: number;
-  initialEquityUsd?: number;
-  source?: string;
-  fillModel?: string;
-  feeModel?: string;
-  slippageBps?: number;
-  headers?: Record<string, string>;
-};
-
 export async function submitBacktestRun(
   baseUrl: string,
   token: string,
@@ -903,213 +939,6 @@ export async function chatRequest(
     body: JSON.stringify(resolvedBody),
   });
 }
-
-export async function commitFiles(
-  baseUrl: string,
-  token: string,
-  appId: string,
-  files: Record<string, string>,
-  commitMessage: string
-): Promise<{ commitSha: string }> {
-  const response = await apiFetch(baseUrl, token, `/v4/apps/${appId}/commits`, {
-    method: "POST",
-    body: JSON.stringify({ files, message: commitMessage }),
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Commit failed: ${response.status} ${text}`);
-  }
-  return (await response.json()) as { commitSha: string };
-}
-
-export async function deployApp(
-  baseUrl: string,
-  token: string,
-  appId: string,
-  input?: {
-    environment?: "preview" | "production";
-    commitSha?: string;
-    branch?: string;
-  }
-): Promise<{
-  deploymentId: string;
-  environment?: "preview" | "production";
-  url?: string;
-  version?: number;
-  commitSha?: string;
-}> {
-  const environment = input?.environment ?? "production";
-  const response = await apiFetch(
-    baseUrl,
-    token,
-    `/v4/apps/${appId}/deployments`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        environment,
-        ...(input?.commitSha ? { commitSha: input.commitSha } : {}),
-        ...(input?.branch ? { branch: input.branch } : {}),
-      }),
-    }
-  );
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Deploy failed: ${response.status} ${text}`);
-  }
-  return (await response.json()) as { deploymentId: string };
-}
-
-export type DeploymentLogEntry = {
-  id: string;
-  type?: string;
-  message: string;
-  createdAt: string;
-};
-
-export async function getDeploymentLogs(
-  apiBase: string,
-  token: string,
-  deploymentId: string
-): Promise<DeploymentLogEntry[]> {
-  const response = await apiFetch(
-    apiBase,
-    token,
-    `/apps/deployments/${deploymentId}/logs`,
-    { method: "GET" }
-  );
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Deployment logs failed: ${response.status} ${text}`);
-  }
-  const payload = (await response.json().catch(() => ({}))) as {
-    logs?: Array<{
-      id?: string;
-      type?: string;
-      message?: string;
-      createdAt?: string | Date;
-    }>;
-  };
-  const logs = Array.isArray(payload.logs) ? payload.logs : [];
-  return logs.map((log) => {
-    const createdAt =
-      typeof log.createdAt === "string"
-        ? log.createdAt
-        : log.createdAt instanceof Date
-          ? log.createdAt.toISOString()
-          : new Date().toISOString();
-    return {
-      id: typeof log.id === "string" ? log.id : `${Math.random()}`,
-      type: typeof log.type === "string" ? log.type : undefined,
-      message: typeof log.message === "string" ? log.message : "",
-      createdAt,
-    };
-  });
-}
-
-export async function getDeploymentStatus(
-  apiBase: string,
-  token: string,
-  deploymentId: string
-): Promise<{ status?: string }> {
-  const response = await apiFetch(
-    apiBase,
-    token,
-    `/apps/deployments/${deploymentId}/status`,
-    { method: "GET" }
-  );
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Deployment status failed: ${response.status} ${text}`);
-  }
-  const payload = (await response.json().catch(() => ({}))) as {
-    deployment?: { status?: string };
-  };
-  return { status: payload.deployment?.status };
-}
-
-export async function getLatestDeploymentForApp(
-  apiBase: string,
-  token: string,
-  appId: string,
-  options?: { status?: string[]; createdAfter?: string; branch?: string }
-): Promise<{ id?: string; status?: string } | null> {
-  const params = new URLSearchParams();
-  if (options?.status && options.status.length > 0) {
-    params.set("status", options.status.join(","));
-  }
-  if (options?.createdAfter) {
-    params.set("createdAfter", options.createdAfter);
-  }
-  if (options?.branch) {
-    params.set("branch", options.branch);
-  }
-  const query = params.toString();
-  const response = await apiFetch(
-    apiBase,
-    token,
-    `/apps/${appId}/deployments/latest${query ? `?${query}` : ""}`,
-    { method: "GET" }
-  );
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Latest deployment lookup failed: ${response.status} ${text}`);
-  }
-  const payload = (await response.json().catch(() => ({}))) as {
-    deployment?: { id?: string; status?: string } | null;
-  };
-  if (!payload.deployment) return null;
-  return {
-    id: payload.deployment.id,
-    status: payload.deployment.status,
-  };
-}
-
-export type DeploymentDetail = {
-  id: string;
-  appId: string;
-  status: string;
-  createdAt: string;
-  gitBranch: string | null;
-  toolsJson?: unknown;
-  metadataJson?: unknown;
-};
-
-export async function getDeploymentDetail(
-  apiBase: string,
-  token: string,
-  deploymentId: string
-): Promise<DeploymentDetail | null> {
-  const response = await apiFetch(
-    apiBase,
-    token,
-    `/apps/deployments/${deploymentId}`,
-    { method: "GET" }
-  );
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Deployment fetch failed: ${response.status} ${text}`);
-  }
-  const payload = (await response.json().catch(() => ({}))) as {
-    deployment?: DeploymentDetail | null;
-  };
-  return payload.deployment ?? null;
-}
-
-export type ToolExecuteRequest = {
-  appId: string;
-  deploymentId: string;
-  toolName: string;
-  method?: "GET" | "POST" | "PUT" | "DELETE";
-  body?: unknown;
-  headers?: Record<string, string>;
-};
-
-export type ToolExecuteResponse = {
-  ok: boolean;
-  status: number;
-  data?: unknown;
-  error?: string;
-};
 
 function normalizeToolPathSegment(toolName: string): string {
   const trimmed = toolName.trim().replace(/^\/+/, "");
