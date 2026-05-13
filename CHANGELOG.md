@@ -1,5 +1,11 @@
 # openpond-code
 
+## 0.3.5
+
+### Patch Changes
+
+- bf8b0e6: added more agent controls
+
 ## 0.3.4
 
 ### Patch Changes
