@@ -1,5 +1,11 @@
 # openpond-code
 
+## 0.4.0
+
+### Minor Changes
+
+- f5646cb: added balances
+
 ## 0.3.5
 
 ### Patch Changes
