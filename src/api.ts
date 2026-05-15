@@ -49,6 +49,7 @@ import type {
   OpenPondAccountProduct,
   OpenPondAccount,
   OpenPondAccountResponse,
+  OpenPondAccountBalanceResponse,
   OpenPondApiHealthResponse,
   OpenPondApiHealth,
   AssistantMode,
@@ -119,6 +120,7 @@ export type {
   OpenPondAccountProduct,
   OpenPondAccount,
   OpenPondAccountResponse,
+  OpenPondAccountBalanceResponse,
   OpenPondApiHealthResponse,
   OpenPondApiHealth,
   AssistantMode,
@@ -692,6 +694,20 @@ export async function getOpenPondAccount(
     throw new Error(`Account lookup failed: ${response.status} ${text}`);
   }
   return (await response.json()) as OpenPondAccountResponse;
+}
+
+export async function getOpenPondAccountBalance(
+  baseUrl: string,
+  token: string
+): Promise<OpenPondAccountBalanceResponse> {
+  const response = await apiFetch(baseUrl, token, "/account/balance", {
+    method: "GET",
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Account balance lookup failed: ${response.status} ${text}`);
+  }
+  return (await response.json()) as OpenPondAccountBalanceResponse;
 }
 
 export async function checkOpenPondApiHealth(

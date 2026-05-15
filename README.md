@@ -110,6 +110,7 @@ const result = await client.tool.run("handle/repo", "myTool", {
 
 const apps = await client.apps.list();
 const account = await client.account.get();
+const balance = await client.account.balance();
 const health = await client.account.health();
 const accountTools = await client.apps.tools();
 const performance = await client.apps.performance({ appId: "app_123" });

@@ -540,6 +540,27 @@ export type OpenPondAccountResponse = {
   asOf: string;
 };
 
+export type OpenPondAccountBalanceBreakdownItem = {
+  wallet: "operating" | "personal" | string;
+  chain: string;
+  chainId: number | null;
+  asset: string;
+  amount: string | null;
+  usdValue: string | null;
+};
+
+export type OpenPondAccountBalanceResponse = {
+  balanceKind: "openpond_funding" | string;
+  balanceUsd: string | null;
+  balanceUsdCents: number | null;
+  balanceLabel: string;
+  currency: "USD" | string;
+  asOf: string;
+  stale?: boolean;
+  credits?: string | null;
+  breakdown: OpenPondAccountBalanceBreakdownItem[];
+};
+
 export type OpenPondApiHealthResponse = {
   status: string;
   service?: string;
