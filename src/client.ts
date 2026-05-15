@@ -18,6 +18,7 @@ import {
   getDeploymentStatus,
   getLatestDeploymentForApp,
   getOpenPondAccount,
+  getOpenPondAccountBalance,
   getOpenToolRecipe,
   getOpenToolRules,
   getTemplateStatus,
@@ -56,6 +57,7 @@ import {
   type DeploymentDetail,
   type DeploymentLogEntry,
   type OpenPondAccount,
+  type OpenPondAccountBalanceResponse,
   type OpenPondAccountProduct,
   type OpenPondAccountResponse,
   type OpenPondApiHealth,
@@ -119,6 +121,7 @@ export type {
   DeploymentDetail,
   DeploymentLogEntry,
   OpenPondAccount,
+  OpenPondAccountBalanceResponse,
   OpenPondAccountProduct,
   OpenPondAccountResponse,
   OpenPondApiHealth,
@@ -215,6 +218,7 @@ export {
   getDeploymentStatus,
   getLatestDeploymentForApp,
   getOpenPondAccount,
+  getOpenPondAccountBalance,
   getOpenToolRecipe,
   getOpenToolRules,
   getTemplateStatus,
@@ -333,6 +337,7 @@ export type OpenPondClient = {
   apiKey: string;
   account: {
     get: () => Promise<OpenPondAccountResponse>;
+    balance: () => Promise<OpenPondAccountBalanceResponse>;
     health: () => Promise<OpenPondApiHealth>;
   };
   chat: {
@@ -830,6 +835,7 @@ export function createClient(options: OpenPondClientOptions): OpenPondClient {
     apiKey,
     account: {
       get: async () => getOpenPondAccount(apiUrl, apiKey),
+      balance: async () => getOpenPondAccountBalance(apiUrl, apiKey),
       health: async () => checkOpenPondApiHealth(apiUrl, apiKey),
     },
     chat: {
