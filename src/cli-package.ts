@@ -765,7 +765,11 @@ function printHelp(): void {
   console.log("  openpond organizations update <slug> [--name <name>] [--status active|disabled|archived]");
   console.log("  openpond organizations members <slug>");
   console.log("  openpond organizations member-upsert <slug> --email <email> --role owner|admin|member");
+  console.log("  openpond organizations mcp-get <slug>");
   console.log("  openpond organizations mcp-generate <slug> [--origin <url>] [--toolset <csv>]");
+  console.log("  openpond organizations mcp-rotate <slug>");
+  console.log("  openpond organizations mcp-disable <slug>");
+  console.log("  openpond organizations mcp-enable <slug>");
   console.log("  openpond organizations mcp-probe <slug> [--origin <url>] [--tool <name>] [--arguments <json>] [--access-token <token>]");
   console.log("  openpond organizations mcp-authorize <slug> [--origin <url>] [--scope <csv|space>] [--tool <name>] [--arguments <json>] [--open]");
   console.log("  openpond sandbox list [--env staging] [--sandbox-api-url <url>]");
@@ -774,8 +778,14 @@ function printHelp(): void {
   console.log("  openpond sandbox templates [--team-id <id>] [--app-id <id>] [--query <text>] [--name <name>] [--use-case <id>]");
   console.log("  openpond sandbox template-builds --team-id <id>");
   console.log("  openpond sandbox template-build-create --team-id <id> --source-repo-url <url> [--branch <branch>] [--publish]");
+  console.log("  openpond sandbox template-build-get <buildId>");
+  console.log("  openpond sandbox template-build-logs <buildId>");
+  console.log("  openpond sandbox template-build-cancel <buildId>");
   console.log("  openpond sandbox template-build-watch <buildId> [--interval-ms 5000] [--timeout-ms 900000]");
   console.log("  openpond sandbox replay-start --team-id <id> --snapshot-id <id> [--entrypoint <name>] [--params <json>] [--artifact-paths <csv>]");
+  console.log("  openpond sandbox replay-get <replayId> [--team-id <id>]");
+  console.log("  openpond sandbox replay-logs <replayId> [--team-id <id>]");
+  console.log("  openpond sandbox replay-cancel <replayId> [--team-id <id>]");
   console.log("  openpond sandbox replay-watch <replayId> [--team-id <id>] [--interval-ms 5000] [--timeout-ms 900000]");
   console.log("  openpond sandbox replay-artifacts <replayId> [--team-id <id>]");
   console.log("  openpond sandbox template-launch [--snapshot-id <id>|--template-name <name>|--use-case <id>] [--version <v>] [--team-id <id>] [--budget-usd 0.05]");
