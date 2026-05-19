@@ -71,6 +71,9 @@ import {
   type SandboxCreateInput,
   type SandboxIntegrationConnectionLeaseInput,
   type SandboxRecord,
+  type SandboxReplayArtifact,
+  type SandboxReplayInput,
+  type SandboxReplayRecord,
   type SandboxSnapshotValidateInput,
   type SandboxSmokeOptions,
   type SandboxTemplateBuildCreateInput,
@@ -772,6 +775,9 @@ function printHelp(): void {
   console.log("  openpond sandbox template-builds --team-id <id>");
   console.log("  openpond sandbox template-build-create --team-id <id> --source-repo-url <url> [--branch <branch>] [--publish]");
   console.log("  openpond sandbox template-build-watch <buildId> [--interval-ms 5000] [--timeout-ms 900000]");
+  console.log("  openpond sandbox replay-start --team-id <id> --snapshot-id <id> [--entrypoint <name>] [--params <json>] [--artifact-paths <csv>]");
+  console.log("  openpond sandbox replay-watch <replayId> [--team-id <id>] [--interval-ms 5000] [--timeout-ms 900000]");
+  console.log("  openpond sandbox replay-artifacts <replayId> [--team-id <id>]");
   console.log("  openpond sandbox template-launch [--snapshot-id <id>|--template-name <name>|--use-case <id>] [--version <v>] [--team-id <id>] [--budget-usd 0.05]");
   console.log(
     "  openpond sandbox snapshot-fork <snapshotId> [--team-id <id>] [--app-id <id>] [--budget-usd 0.05]",
@@ -2704,6 +2710,35 @@ function formatTemplateBuildLine(build: SandboxTemplateBuildRecord): string {
   ].join("  ");
 }
 
+function formatReplayLine(replay: SandboxReplayRecord): string {
+  return [
+    replay.id,
+    `team=${replay.teamId}`,
+    `state=${replay.state}`,
+    `snapshot=${replay.snapshotId}`,
+    `sandbox=${replay.sandboxId ?? "-"}`,
+    `command=${replay.commandId ?? "-"}`,
+    `exit=${replay.exitCode ?? "-"}`,
+    `cleanup=${replay.cleanup.action}:${replay.cleanup.status}`,
+    `error=${replay.error ?? "-"}`,
+    replay.createdAt,
+  ].join("  ");
+}
+
+function summarizeReplayArtifact(artifact: SandboxReplayArtifact): Record<string, unknown> {
+  return {
+    path: artifact.path,
+    status: artifact.status,
+    sizeBytes: artifact.sizeBytes,
+    error: artifact.error,
+    ...(artifact.contentsBase64
+      ? {
+          contentsBase64: artifact.contentsBase64,
+        }
+      : {}),
+  };
+}
+
 function normalizeSnapshotValidationCleanup(
   value: unknown,
 ): SandboxSnapshotValidateInput["cleanup"] | undefined {
@@ -2713,6 +2748,74 @@ function normalizeSnapshotValidationCleanup(
     return cleanup;
   }
   throw new Error("snapshot-validate --cleanup must be delete, stop, or archive");
+}
+
+function normalizeReplayCleanup(value: unknown): SandboxReplayInput["cleanup"] | undefined {
+  if (typeof value !== "string") return undefined;
+  const cleanup = value.trim();
+  if (cleanup === "delete" || cleanup === "stop" || cleanup === "archive") {
+    return cleanup;
+  }
+  throw new Error("replay cleanup must be delete, stop, or archive");
+}
+
+function buildSandboxReplayInput(
+  options: Record<string, string | boolean>,
+): SandboxReplayInput & { teamId?: string; appId?: string } {
+  const snapshotId =
+    typeof options.snapshotId === "string" && options.snapshotId.trim()
+      ? options.snapshotId.trim()
+      : typeof options.snapshot === "string" && options.snapshot.trim()
+        ? options.snapshot.trim()
+        : "";
+  if (!snapshotId) {
+    throw new Error("replay-start requires --snapshot-id <id>");
+  }
+  const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+  const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+  const sourceSandboxId =
+    typeof options.sourceSandboxId === "string" && options.sourceSandboxId.trim()
+      ? options.sourceSandboxId.trim()
+      : "";
+  const entrypoint =
+    typeof options.entrypoint === "string" && options.entrypoint.trim()
+      ? options.entrypoint.trim()
+      : "";
+  const params =
+    typeof options.params === "string" && options.params.trim()
+      ? parseJsonOption(options.params, "params")
+      : {};
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    throw new Error("params must be a JSON object");
+  }
+  const budgetUsd =
+    typeof options.budgetUsd === "string" && options.budgetUsd.trim()
+      ? options.budgetUsd.trim()
+      : typeof options.budget === "string" && options.budget.trim()
+        ? options.budget.trim()
+        : "";
+  const maxDurationSeconds = parseIntegerOption(options.maxDurationSeconds, "max-duration-seconds");
+  const idleTimeoutSeconds = parseIntegerOption(options.idleTimeoutSeconds, "idle-timeout-seconds");
+  const artifactPaths = parseCsvOption(options.artifactPaths);
+  const idempotencyKey =
+    typeof options.idempotencyKey === "string" && options.idempotencyKey.trim()
+      ? options.idempotencyKey.trim()
+      : "";
+  const cleanup = normalizeReplayCleanup(options.cleanup);
+  return {
+    snapshotId,
+    ...(teamId ? { teamId } : {}),
+    ...(appId ? { appId } : {}),
+    ...(sourceSandboxId ? { sourceSandboxId } : {}),
+    ...(entrypoint ? { entrypoint } : {}),
+    params: params as Record<string, unknown>,
+    ...(budgetUsd ? { budget: { maxUsd: budgetUsd } } : {}),
+    ...(maxDurationSeconds !== undefined ? { maxDurationSeconds } : {}),
+    ...(idleTimeoutSeconds !== undefined ? { idleTimeoutSeconds } : {}),
+    ...(artifactPaths.length > 0 ? { artifactPaths } : {}),
+    ...(idempotencyKey ? { idempotencyKey } : {}),
+    ...(cleanup ? { cleanup } : {}),
+  };
 }
 
 function buildSandboxCreateInput(options: Record<string, string | boolean>): SandboxCreateInput {
@@ -3505,6 +3608,142 @@ async function runSandboxCommand(
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
     throw new Error(`sandbox template build did not finish within ${timeoutMs}ms`);
+  }
+
+  if (subcommand === "replays" || subcommand === "replay-list") {
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const result = await client.listReplays({
+      ...(teamId ? { teamId } : {}),
+      ...(appId ? { appId } : {}),
+    });
+    if (parseBooleanOption(options.json)) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    if (result.replays.length === 0) {
+      console.log("no sandbox replays found");
+      return;
+    }
+    for (const replay of result.replays) {
+      console.log(formatReplayLine(replay));
+    }
+    return;
+  }
+
+  if (subcommand === "replay-start" || subcommand === "start-replay") {
+    const result = await client.startReplay(buildSandboxReplayInput(options));
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (subcommand === "replay-get" || subcommand === "get-replay") {
+    const replayId = rest[1];
+    if (!replayId) {
+      throw new Error("usage: sandbox replay-get <replayId> [--team-id <id>]");
+    }
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const result = await client.getReplay(replayId, {
+      ...(teamId ? { teamId } : {}),
+      ...(appId ? { appId } : {}),
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (subcommand === "replay-logs" || subcommand === "logs-replay") {
+    const replayId = rest[1];
+    if (!replayId) {
+      throw new Error("usage: sandbox replay-logs <replayId> [--team-id <id>]");
+    }
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const result = await client.getReplayLogs(replayId, {
+      ...(teamId ? { teamId } : {}),
+      ...(appId ? { appId } : {}),
+    });
+    for (const line of result.logs) {
+      console.log(line);
+    }
+    return;
+  }
+
+  if (subcommand === "replay-artifacts" || subcommand === "artifacts-replay") {
+    const replayId = rest[1];
+    if (!replayId) {
+      throw new Error("usage: sandbox replay-artifacts <replayId> [--team-id <id>]");
+    }
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const result = await client.getReplayArtifacts(replayId, {
+      ...(teamId ? { teamId } : {}),
+      ...(appId ? { appId } : {}),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          replayId: result.replayId,
+          artifacts: result.artifacts.map(summarizeReplayArtifact),
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "replay-cancel" || subcommand === "cancel-replay") {
+    const replayId = rest[1];
+    if (!replayId) {
+      throw new Error("usage: sandbox replay-cancel <replayId> [--team-id <id>]");
+    }
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const result = await client.cancelReplay(replayId, {
+      ...(teamId ? { teamId } : {}),
+      ...(appId ? { appId } : {}),
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (subcommand === "replay-watch" || subcommand === "watch-replay") {
+    const replayId = rest[1];
+    if (!replayId) {
+      throw new Error("usage: sandbox replay-watch <replayId> [--team-id <id>]");
+    }
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const intervalMs = parseIntegerOption(options.intervalMs, "interval-ms") ?? 5000;
+    const timeoutMs = parseIntegerOption(options.timeoutMs, "timeout-ms") ?? 15 * 60 * 1000;
+    const startedAt = Date.now();
+    const seenLogs = new Set<string>();
+    while (Date.now() - startedAt <= timeoutMs) {
+      const result = await client.getReplay(replayId, {
+        ...(teamId ? { teamId } : {}),
+        ...(appId ? { appId } : {}),
+      });
+      for (const line of result.replay.logs) {
+        if (!seenLogs.has(line)) {
+          seenLogs.add(line);
+          console.log(line);
+        }
+      }
+      if (
+        result.replay.state === "succeeded" ||
+        result.replay.state === "failed" ||
+        result.replay.state === "canceled"
+      ) {
+        console.log(formatReplayLine(result.replay));
+        if (result.replay.state !== "succeeded") {
+          throw new Error(`sandbox replay ${result.replay.state}: ${result.replay.error ?? "no error"}`);
+        }
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    throw new Error(`sandbox replay did not finish within ${timeoutMs}ms`);
   }
 
   if (subcommand === "template-launch" || subcommand === "launch-template") {
