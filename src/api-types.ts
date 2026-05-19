@@ -115,6 +115,7 @@ export type AppListItem = {
   description: string | null;
   appType: string | null;
   visibility: "public" | "private";
+  codeVisibility?: "public" | "private";
   gitOwner: string | null;
   gitRepo: string | null;
   gitProvider: string | null;
@@ -136,6 +137,17 @@ export type AppListItem = {
     gitBranch: string | null;
   } | null;
   scheduleSummary?: AppScheduleSummary | null;
+};
+
+export type AppCodeVisibilityUpdateResponse = {
+  success: boolean;
+  app: {
+    id: string;
+    gitOwner: string | null;
+    gitRepo: string | null;
+    codeVisibility: "public" | "private";
+    updatedAt: string;
+  } | null;
 };
 
 export type AppRuntimeSummary = {

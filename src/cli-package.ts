@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
 import { promises as fs, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -27,6 +28,7 @@ import {
   deployLatestTemplate,
   getAppEnvironment,
   updateAppEnvironment,
+  updateAppCodeVisibility,
   executeUserTool,
   runAssistantMode,
   submitPositionsTx,
@@ -51,10 +53,26 @@ import {
   type LocalConfig,
 } from "./config";
 import { consumeStream, formatStreamItem } from "./stream";
+import { DEFAULT_OPENPOND_API_BASE_URL, DEFAULT_OPENPOND_WEB_BASE_URL } from "./urls";
 import {
-  DEFAULT_OPENPOND_API_BASE_URL,
-  DEFAULT_OPENPOND_WEB_BASE_URL,
-} from "./urls";
+  createOpenPondSandboxClient,
+  type OpenPondSandboxClient,
+  type OpenPondOrganization,
+  type OpenPondOrganizationCreateInput,
+  type OpenPondOrganizationMcpGenerateInput,
+  type OpenPondOrganizationMcpServer,
+  type OpenPondOrganizationMember,
+  type OpenPondOrganizationMemberUpsertInput,
+  type OpenPondOrganizationRole,
+  type OpenPondOrganizationUpdateInput,
+  type SandboxCreateInput,
+  type SandboxIntegrationConnectionLeaseInput,
+  type SandboxRecord,
+  type SandboxSnapshotValidateInput,
+  type SandboxSmokeOptions,
+  type SandboxTemplateBuildCreateInput,
+  type SandboxTemplateBuildRecord,
+} from "./sandbox";
 
 const DEFAULT_OPENPOND_API_HOST = new URL(DEFAULT_OPENPOND_API_BASE_URL).hostname;
 const DEFAULT_OPENPOND_WEB_HOST = new URL(DEFAULT_OPENPOND_WEB_BASE_URL).hostname;
@@ -69,6 +87,9 @@ type Command =
   | "backtest"
   | "apps"
   | "repo"
+  | "sandbox"
+  | "organization"
+  | "organizations"
   | "template"
   | "opentool"
   | "check-update"
@@ -115,13 +136,15 @@ async function fetchLatestNpmVersion(packageName: string): Promise<string> {
   try {
     const response = await fetch(
       `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`,
-      { signal: controller.signal }
+      { signal: controller.signal },
     );
     if (!response.ok) {
       const text = await response.text().catch(() => "");
       throw new Error(`npm registry request failed: ${response.status} ${text}`.trim());
     }
-    const payload = (await response.json().catch(() => ({}))) as { version?: unknown };
+    const payload = (await response.json().catch(() => ({}))) as {
+      version?: unknown;
+    };
     if (typeof payload.version !== "string" || payload.version.trim().length === 0) {
       throw new Error("npm registry payload missing version");
     }
@@ -220,6 +243,46 @@ function resolveChatApiBaseUrlOption(options: Record<string, string | boolean>):
   return trimmed.replace(/\/$/, "");
 }
 
+function resolveSandboxApiUrlOption(options: Record<string, string | boolean>): string | null {
+  const raw =
+    typeof options.sandboxApiUrl === "string"
+      ? options.sandboxApiUrl
+      : typeof options.sandboxApiurl === "string"
+        ? options.sandboxApiurl
+        : null;
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === "true") {
+    throw new Error("sandbox-api-url must be a non-empty value");
+  }
+  return trimmed.replace(/\/$/, "");
+}
+
+function resolveSandboxBaseUrl(
+  config: LocalConfig,
+  options: Record<string, string | boolean>,
+): string {
+  const envName =
+    typeof options.env === "string"
+      ? options.env.trim().toLowerCase()
+      : typeof options.environment === "string"
+        ? options.environment.trim().toLowerCase()
+        : "";
+  if (envName === "staging") {
+    return "https://api.staging-api.openpond.ai";
+  }
+  if (envName && envName !== "production") {
+    throw new Error("sandbox env must be staging or production");
+  }
+  const base =
+    process.env.OPENPOND_SANDBOX_BASE_URL ||
+    process.env.OPENPOND_API_URL ||
+    config.apiBaseUrl ||
+    mapUiBaseToApiBase(process.env.OPENPOND_BASE_URL || config.baseUrl) ||
+    DEFAULT_OPENPOND_API_BASE_URL;
+  return base.replace(/\/$/, "");
+}
+
 function resolveBaseUrl(config: LocalConfig): string {
   const envBase = process.env.OPENPOND_BASE_URL;
   const base = envBase || config.baseUrl || DEFAULT_OPENPOND_WEB_BASE_URL;
@@ -232,7 +295,11 @@ function mapUiBaseToApiBase(baseUrl: string | undefined): string | null {
   try {
     const url = new URL(trimmed);
     const host = url.hostname.toLowerCase();
-    if (host === DEFAULT_OPENPOND_WEB_HOST || host === "openpond.live" || host === "www.openpond.live") {
+    if (
+      host === DEFAULT_OPENPOND_WEB_HOST ||
+      host === "openpond.live" ||
+      host === "www.openpond.live"
+    ) {
       return DEFAULT_OPENPOND_API_BASE_URL;
     }
     if (host === DEFAULT_OPENPOND_API_HOST || host.startsWith("api.")) {
@@ -261,9 +328,7 @@ function normalizeTemplateRepoUrl(input: string, baseUrl: string): string {
     return trimmed.endsWith(".git") ? trimmed : `${trimmed}.git`;
   }
   const normalizedBase = baseUrl.replace(/\/$/, "");
-  const [owner, repoRaw] = trimmed.includes("/")
-    ? trimmed.split("/", 2)
-    : ["openpondai", trimmed];
+  const [owner, repoRaw] = trimmed.includes("/") ? trimmed.split("/", 2) : ["openpondai", trimmed];
   const repo = repoRaw.endsWith(".git") ? repoRaw.slice(0, -4) : repoRaw;
   if (!owner || !repo) {
     throw new Error("template must be <owner>/<repo> or a full https URL");
@@ -285,6 +350,35 @@ function parseBooleanOption(value: string | boolean | undefined): boolean {
     return value.toLowerCase() === "true";
   }
   return false;
+}
+
+function parseNumberOption(value: string | boolean | undefined, label: string): number | undefined {
+  if (typeof value !== "string") return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`${label} must be a number`);
+  }
+  return parsed;
+}
+
+function parseIntegerOption(
+  value: string | boolean | undefined,
+  label: string,
+): number | undefined {
+  const parsed = parseNumberOption(value, label);
+  if (parsed === undefined) return undefined;
+  if (!Number.isInteger(parsed)) {
+    throw new Error(`${label} must be an integer`);
+  }
+  return parsed;
+}
+
+function parseCsvOption(value: string | boolean | undefined): string[] {
+  if (typeof value !== "string") return [];
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function parseTimeOption(value: string | boolean | undefined, label: string): string | undefined {
@@ -342,7 +436,11 @@ async function ensureApiKey(config: LocalConfig, baseUrl: string): Promise<strin
   const existing = resolveApiKey(config);
   if (existing) return existing;
   const apiKey = await promptForApiKey();
-  await saveGlobalConfig({ apiKey, baseUrl, activeProfile: config.activeProfile });
+  await saveGlobalConfig({
+    apiKey,
+    baseUrl,
+    activeProfile: config.activeProfile,
+  });
   console.log("saved api key to ~/.openpond/config.json");
   return apiKey;
 }
@@ -351,9 +449,7 @@ async function promptConfirm(question: string, defaultValue = false): Promise<bo
   const rl = createInterface({ input, output });
   try {
     const suffix = defaultValue ? "[Y/n]" : "[y/N]";
-    const answer = (await rl.question(`${question} ${suffix} `))
-      .trim()
-      .toLowerCase();
+    const answer = (await rl.question(`${question} ${suffix} `)).trim().toLowerCase();
     if (!answer) return defaultValue;
     return answer === "y" || answer === "yes";
   } finally {
@@ -380,7 +476,7 @@ type CommandResult = {
 async function runCommand(
   command: string,
   args: string[],
-  options: { cwd?: string; inherit?: boolean } = {}
+  options: { cwd?: string; inherit?: boolean } = {},
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, {
@@ -404,11 +500,10 @@ async function runCommand(
   });
 }
 
-async function getGitRemoteUrl(
-  cwd: string,
-  remoteName: string
-): Promise<string | null> {
-  const result = await runCommand("git", ["remote", "get-url", remoteName], { cwd });
+async function getGitRemoteUrl(cwd: string, remoteName: string): Promise<string | null> {
+  const result = await runCommand("git", ["remote", "get-url", remoteName], {
+    cwd,
+  });
   if (result.code !== 0) return null;
   const url = result.stdout.trim();
   return url.length > 0 ? url : null;
@@ -450,11 +545,9 @@ function warnOnRepoHostMismatch(repoUrl: string): void {
     const repoHost = new URL(repoUrl).hostname;
     if (baseHost && repoHost && baseHost !== repoHost) {
       console.warn(
-        `warning: repo host (${repoHost}) does not match OPENPOND_BASE_URL (${baseHost})`
+        `warning: repo host (${repoHost}) does not match OPENPOND_BASE_URL (${baseHost})`,
       );
-      console.warn(
-        "warning: verify your git host configuration matches OPENPOND_BASE_URL."
-      );
+      console.warn("warning: verify your git host configuration matches OPENPOND_BASE_URL.");
     }
   } catch {
     // ignore malformed env base or repo URL
@@ -525,7 +618,7 @@ async function fetchToolsWithCache(params: {
 async function resolveAppTarget(
   apiBase: string,
   apiKey: string,
-  target: string
+  target: string,
 ): Promise<{ app: AppListItem; handle: string; repo: string }> {
   const { handle, repo } = parseHandleRepo(target);
   const apps = await fetchAppsWithCache({ apiBase, apiKey });
@@ -534,11 +627,7 @@ async function resolveAppTarget(
     if (app.handle && app.handle !== handle) {
       return false;
     }
-    const candidates = [
-      app.repo,
-      app.gitRepo,
-      app.id,
-    ].map(normalizeRepoName);
+    const candidates = [app.repo, app.gitRepo, app.id].map(normalizeRepoName);
     return candidates.includes(normalizedRepo);
   });
   if (!match) {
@@ -561,11 +650,7 @@ async function pollDeploymentLogs(params: {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
-    const logs = await getDeploymentLogs(
-      params.baseUrl,
-      params.apiKey,
-      params.deploymentId
-    );
+    const logs = await getDeploymentLogs(params.baseUrl, params.apiKey, params.deploymentId);
     const newLogs = logs.filter((log) => !seen.has(log.id));
     for (const log of newLogs) {
       seen.add(log.id);
@@ -574,11 +659,7 @@ async function pollDeploymentLogs(params: {
       console.log(`${params.prefix}${log.message}`);
     }
 
-    const status = await getDeploymentStatus(
-      params.baseUrl,
-      params.apiKey,
-      params.deploymentId
-    );
+    const status = await getDeploymentStatus(params.baseUrl, params.apiKey, params.deploymentId);
     if (status.status === "failed") {
       console.log(`${params.prefix}deployment failed`);
       return;
@@ -596,7 +677,7 @@ async function pollDeploymentLogs(params: {
 
 async function runTemplateStatus(
   _options: Record<string, string | boolean>,
-  target: string
+  target: string,
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
@@ -609,7 +690,7 @@ async function runTemplateStatus(
 
 async function runTemplateBranches(
   _options: Record<string, string | boolean>,
-  target: string
+  target: string,
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
@@ -622,7 +703,7 @@ async function runTemplateBranches(
 
 async function runTemplateUpdate(
   options: Record<string, string | boolean>,
-  target: string
+  target: string,
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
@@ -651,16 +732,18 @@ function printHelp(): void {
   console.log("  openpond login [--api-key <key>]");
   console.log("  openpond profiles list");
   console.log("  openpond profiles use <name>");
-  console.log("  openpond profiles save <name> --api-key <key> [--base-url <url>] [--api-base-url <url>] [--chat-api-base-url <url>]");
+  console.log(
+    "  openpond profiles save <name> --api-key <key> [--base-url <url>] [--api-base-url <url>] [--chat-api-base-url <url>]",
+  );
   console.log("  openpond account");
   console.log("  openpond health");
   console.log("  openpond tool list <handle>/<repo>");
   console.log("  openpond tool run <handle>/<repo> <tool> [--body <json>] [--method <METHOD>]");
   console.log(
-    "  openpond backtest run <handle>/<repo> <tool> [--body <json>] [--branch <branch>] [--deployment-id <id>]"
+    "  openpond backtest run <handle>/<repo> <tool> [--body <json>] [--branch <branch>] [--deployment-id <id>]",
   );
   console.log(
-    "  openpond backtest events <handle>/<repo> [--run-id <id>] [--source <source>] [--status <csv>] [--symbol <symbol>] [--wallet-address <0x...>] [--since <ms|iso>] [--until <ms|iso>] [--limit <n>] [--cursor <cursor>] [--params <json>]"
+    "  openpond backtest events <handle>/<repo> [--run-id <id>] [--source <source>] [--status <csv>] [--symbol <symbol>] [--wallet-address <0x...>] [--since <ms|iso>] [--until <ms|iso>] [--limit <n>] [--cursor <cursor>] [--params <json>]",
   );
   console.log("  openpond backtest get <handle>/<repo> --run-id <id>");
   console.log("  openpond deploy watch <handle>/<repo> [--branch <branch>]");
@@ -668,10 +751,83 @@ function printHelp(): void {
   console.log("  openpond template branches <handle>/<repo>");
   console.log("  openpond template update <handle>/<repo> [--env preview|production]");
   console.log(
-    "  openpond repo create --name <name> [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--env <json>] [--empty|--opentool] [--token] [--auto-schedule-migration <true|false>]"
+    "  openpond repo create --name <name> [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--env <json>] [--empty|--opentool] [--token] [--auto-schedule-migration <true|false>]",
   );
   console.log("  openpond repo push [--path <dir>] [--branch <branch>]");
+  console.log("  openpond organizations list");
+  console.log("  openpond organizations create --name <name> [--slug <slug>] [--primary-contact-email <email>]");
+  console.log("  openpond organizations update <slug> [--name <name>] [--status active|disabled|archived]");
+  console.log("  openpond organizations members <slug>");
+  console.log("  openpond organizations member-upsert <slug> --email <email> --role owner|admin|member");
+  console.log("  openpond organizations mcp-generate <slug> [--origin <url>] [--toolset <csv>]");
+  console.log("  openpond sandbox list [--env staging] [--sandbox-api-url <url>]");
+  console.log("  openpond sandbox mcp-config [--env staging] [--sandbox-api-url <url>]");
+  console.log("  openpond sandbox snapshots [--team-id <id>] [--app-id <id>]");
+  console.log("  openpond sandbox templates [--team-id <id>] [--app-id <id>] [--query <text>] [--name <name>] [--use-case <id>]");
+  console.log("  openpond sandbox template-builds --team-id <id>");
+  console.log("  openpond sandbox template-build-create --team-id <id> --source-repo-url <url> [--branch <branch>] [--publish]");
+  console.log("  openpond sandbox template-build-watch <buildId> [--interval-ms 5000] [--timeout-ms 900000]");
+  console.log("  openpond sandbox template-launch [--snapshot-id <id>|--template-name <name>|--use-case <id>] [--version <v>] [--team-id <id>] [--budget-usd 0.05]");
+  console.log(
+    "  openpond sandbox snapshot-fork <snapshotId> [--team-id <id>] [--app-id <id>] [--budget-usd 0.05]",
+  );
+  console.log(
+    "  openpond sandbox snapshot-create <sandboxId> --name <name> [--template-name <name>] [--template-version <v>] [--template-visibility private|team] [--validation-command <cmd>]",
+  );
+  console.log(
+    "  openpond sandbox snapshot-validate <sandboxId> <snapshotId> [--cleanup delete|stop|archive]",
+  );
+  console.log("  openpond sandbox snapshot-publish <sandboxId> <snapshotId>");
+  console.log(
+    "  openpond sandbox create [--repo <url>] [--budget-usd 0.05] [--cpu 1] [--memory-gb 1] [--disk-gb 8] [--integration-connection <id>] [--integration-capabilities <csv>]",
+  );
+  console.log('  openpond sandbox exec <sandboxId> --command "bun test"');
+  console.log(
+    "  openpond sandbox port <sandboxId> --port 4173 [--access private|public] [--auto-start] [--domain app.example.com] [--auth-token <token>|--auth-header <name> --auth-header-value <value>]",
+  );
+  console.log("  openpond sandbox stop <sandboxId>");
+  console.log("  openpond sandbox delete <sandboxId>");
+  console.log("  openpond sandbox receipts <sandboxId>");
+  console.log("  openpond sandbox logs <sandboxId>");
+  console.log("  openpond sandbox billing <sandboxId>");
+  console.log("  openpond sandbox integration-connections [--team-id <id>] [--app-id <id>] [--status active|all]");
+  console.log("  openpond sandbox integration-leases <sandboxId>");
+  console.log(
+    "  openpond sandbox integration-attach <sandboxId> --integration-connection <id> --integration-capabilities <csv>",
+  );
+  console.log("  openpond sandbox integration-remove <sandboxId> --lease-id <id>");
+  console.log('  openpond sandbox process-start <sandboxId> --command "bun dev"');
+  console.log("  openpond sandbox process-list <sandboxId>");
+  console.log("  openpond sandbox process-get <sandboxId> <processId> [--since <cursor>]");
+  console.log("  openpond sandbox process-stop <sandboxId> <processId>");
+  console.log("  openpond sandbox process-stream <sandboxId> <processId> [--since <cursor>]");
+  console.log('  openpond sandbox pty-start <sandboxId> [--command "/bin/sh"]');
+  console.log("  openpond sandbox pty-list <sandboxId>");
+  console.log("  openpond sandbox pty-get <sandboxId> <ptyId> [--since <cursor>]");
+  console.log('  openpond sandbox pty-write <sandboxId> <ptyId> --input "ls"');
+  console.log("  openpond sandbox pty-stop <sandboxId> <ptyId>");
+  console.log("  openpond sandbox pty-stream <sandboxId> <ptyId> [--since <cursor>]");
+  console.log('  openpond sandbox upload-file <sandboxId> --path <path> --contents "text"');
+  console.log("  openpond sandbox download-file <sandboxId> --path <path>");
+  console.log("  openpond sandbox list-files <sandboxId> [--path <path>]");
+  console.log("  openpond sandbox search-files <sandboxId> --query <text> [--path <path>]");
+  console.log("  openpond sandbox delete-file <sandboxId> --path <path> [--recursive]");
+  console.log("  openpond sandbox stat-file <sandboxId> --path <path>");
+  console.log("  openpond sandbox mkdir <sandboxId> --path <path>");
+  console.log("  openpond sandbox move-file <sandboxId> --from-path <path> --to-path <path>");
+  console.log("  openpond sandbox git-status <sandboxId>");
+  console.log("  openpond sandbox git-diff <sandboxId> [--base-ref <ref>]");
+  console.log(
+    "  openpond sandbox git-branch <sandboxId> --branch <name> [--create] [--start-point <ref>]",
+  );
+  console.log(
+    '  openpond sandbox git-commit <sandboxId> --message "..." [--all|--paths <csv>]',
+  );
+  console.log("  openpond sandbox git-pull <sandboxId> [--remote origin] [--branch main] [--rebase|--ff-only false]");
+  console.log("  openpond sandbox git-push <sandboxId> [--remote origin] [--branch main] [--set-upstream] [--force-with-lease]");
+  console.log("  openpond sandbox smoke --env staging [--account <profile>] [--keep]");
   console.log("  openpond apps list [--handle <handle>] [--refresh]");
+  console.log("  openpond apps code-visibility <handle>/<repo> --visibility public|private");
   console.log("  openpond apps tools");
   console.log("  openpond apps deploy <handle>/<repo> [--env preview|production] [--watch]");
   console.log("  openpond apps env get <handle>/<repo>");
@@ -680,15 +836,15 @@ function printHelp(): void {
   console.log("  openpond apps summary <handle>/<repo>");
   console.log("  openpond apps assistant <plan|performance> <handle>/<repo> --prompt <text>");
   console.log(
-    "  openpond apps store events [--source <source>] [--status <csv>] [--symbol <symbol>] [--wallet-address <0x...>] [--since <ms|iso>] [--until <ms|iso>] [--limit <n>] [--cursor <cursor>] [--history <true|false>] [--params <json>]"
+    "  openpond apps store events [--source <source>] [--status <csv>] [--symbol <symbol>] [--wallet-address <0x...>] [--since <ms|iso>] [--until <ms|iso>] [--limit <n>] [--cursor <cursor>] [--history <true|false>] [--params <json>]",
   );
   console.log("  openpond apps trade-facts [--app-id <id>]");
   console.log("  openpond apps agent create --prompt <text> [--template-id <id>]");
   console.log(
-    "  openpond apps tools execute <appId> <deploymentId> <tool> [--body <json>] [--method <METHOD>] [--headers <json>] [--summary <true|false>]"
+    "  openpond apps tools execute <appId> <deploymentId> <tool> [--body <json>] [--method <METHOD>] [--headers <json>] [--summary <true|false>]",
   );
   console.log(
-    "  openpond apps positions tx [--method <GET|POST>] [--body <json>] [--params <json>]"
+    "  openpond apps positions tx [--method <GET|POST>] [--body <json>] [--params <json>]",
   );
   console.log("  openpond check-update");
   console.log("  openpond opentool <init|validate|build> [args]");
@@ -698,10 +854,11 @@ function printHelp(): void {
   console.log("  --base-url <url> (alias: --baseurl)");
   console.log("  --api-base-url <url> (API endpoint for this profile)");
   console.log("  --chat-api-base-url <url> (hosted chat/model endpoint for this profile)");
+  console.log("  --sandbox-api-url <url> (exact /v1/sandboxes or /api/sandboxes endpoint)");
   console.log("");
   console.log("Env:");
   console.log(
-    "  OPENPOND_API_KEY, OPENPOND_ACCOUNT, OPENPOND_BASE_URL, OPENPOND_API_URL, OPENPOND_CHAT_API_URL, OPENPOND_TOOL_URL"
+    "  OPENPOND_API_KEY, OPENPOND_ACCOUNT, OPENPOND_BASE_URL, OPENPOND_API_URL, OPENPOND_CHAT_API_URL, OPENPOND_TOOL_URL, OPENPOND_SANDBOX_BASE_URL, OPENPOND_SANDBOX_API_URL",
   );
 }
 
@@ -734,7 +891,7 @@ async function runLogin(options: Record<string, string | boolean>): Promise<void
 
 async function runProfiles(
   options: Record<string, string | boolean>,
-  rest: string[]
+  rest: string[],
 ): Promise<void> {
   const subcommand = rest[0] || "list";
   if (subcommand === "list") {
@@ -758,7 +915,9 @@ async function runProfiles(
   if (subcommand === "save") {
     const handle = rest[1];
     if (!handle) {
-      throw new Error("usage: profiles save <name> --api-key <key> [--base-url <url>] [--api-base-url <url>] [--chat-api-base-url <url>]");
+      throw new Error(
+        "usage: profiles save <name> --api-key <key> [--base-url <url>] [--api-base-url <url>] [--chat-api-base-url <url>]",
+      );
     }
     const rawApiKey =
       typeof options.apiKey === "string"
@@ -813,7 +972,9 @@ async function runToolList(options: Record<string, string | boolean>, target: st
   const apiKey = await ensureApiKey(config, uiBase);
   const { app } = await resolveAppTarget(apiBase, apiKey, target);
   const branch = typeof options.branch === "string" ? String(options.branch) : undefined;
-  const latest = await getLatestDeploymentForApp(apiBase, apiKey, app.id, { branch });
+  const latest = await getLatestDeploymentForApp(apiBase, apiKey, app.id, {
+    branch,
+  });
   if (!latest?.id) {
     console.log("no deployments found");
     return;
@@ -833,9 +994,7 @@ async function runToolList(options: Record<string, string | boolean>, target: st
     const record = tool as Record<string, unknown>;
     const profile = (record.profile || record.function) as Record<string, unknown> | undefined;
     const name =
-      (record.name as string | undefined) ||
-      (profile?.name as string | undefined) ||
-      "unknown";
+      (record.name as string | undefined) || (profile?.name as string | undefined) || "unknown";
     const description =
       (record.description as string | undefined) ||
       (profile?.description as string | undefined) ||
@@ -847,7 +1006,7 @@ async function runToolList(options: Record<string, string | boolean>, target: st
 async function runToolRun(
   options: Record<string, string | boolean>,
   target: string,
-  toolName: string
+  toolName: string,
 ) {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
@@ -855,7 +1014,9 @@ async function runToolRun(
   const apiKey = await ensureApiKey(config, uiBase);
   const { app } = await resolveAppTarget(apiBase, apiKey, target);
   const branch = typeof options.branch === "string" ? String(options.branch) : undefined;
-  const latest = await getLatestDeploymentForApp(apiBase, apiKey, app.id, { branch });
+  const latest = await getLatestDeploymentForApp(apiBase, apiKey, app.id, {
+    branch,
+  });
   if (!latest?.id) {
     throw new Error("no deployments found");
   }
@@ -867,8 +1028,7 @@ async function runToolRun(
       throw new Error("tool body must be valid JSON");
     }
   }
-  const method =
-    typeof options.method === "string" ? String(options.method).toUpperCase() : "POST";
+  const method = typeof options.method === "string" ? String(options.method).toUpperCase() : "POST";
   const result = await executeHostedTool(uiBase, apiKey, {
     appId: app.id,
     deploymentId: latest.id,
@@ -887,7 +1047,7 @@ async function runToolRun(
 async function runBacktestRun(
   options: Record<string, string | boolean>,
   target: string,
-  toolName: string
+  toolName: string,
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
@@ -897,24 +1057,20 @@ async function runBacktestRun(
   const branch = typeof options.branch === "string" ? String(options.branch) : undefined;
   const deploymentId =
     typeof options.deploymentId === "string" ? String(options.deploymentId) : undefined;
-  const latest =
-    deploymentId
-      ? { id: deploymentId }
-      : await getLatestDeploymentForApp(apiBase, apiKey, app.id, { branch });
+  const latest = deploymentId
+    ? { id: deploymentId }
+    : await getLatestDeploymentForApp(apiBase, apiKey, app.id, { branch });
   if (!latest?.id) {
     throw new Error("no deployments found");
   }
 
   const bodyRaw =
-    typeof options.body === "string"
-      ? parseJsonOption(String(options.body), "body")
-      : {};
+    typeof options.body === "string" ? parseJsonOption(String(options.body), "body") : {};
   if (!bodyRaw || typeof bodyRaw !== "object" || Array.isArray(bodyRaw)) {
     throw new Error("body must be a JSON object");
   }
 
-  const method =
-    typeof options.method === "string" ? String(options.method).toUpperCase() : "POST";
+  const method = typeof options.method === "string" ? String(options.method).toUpperCase() : "POST";
   const payload = {
     ...(bodyRaw as Record<string, unknown>),
     appId: app.id,
@@ -928,7 +1084,7 @@ async function runBacktestRun(
 
 async function runDeployWatch(
   options: Record<string, string | boolean>,
-  target: string
+  target: string,
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
@@ -938,12 +1094,11 @@ async function runDeployWatch(
   const branch = typeof options.branch === "string" ? String(options.branch) : undefined;
   const deploymentId =
     typeof options.deploymentId === "string" ? String(options.deploymentId) : undefined;
-  const latest =
-    deploymentId
-      ? { id: deploymentId }
-      : await getLatestDeploymentForApp(apiBase, apiKey, app.id, {
-          branch,
-        });
+  const latest = deploymentId
+    ? { id: deploymentId }
+    : await getLatestDeploymentForApp(apiBase, apiKey, app.id, {
+        branch,
+      });
   if (!latest?.id) {
     console.log("no deployments found");
     return;
@@ -960,14 +1115,13 @@ async function runDeployWatch(
 
 async function runRepoCreate(
   options: Record<string, string | boolean>,
-  nameParts: string[]
+  nameParts: string[],
 ): Promise<void> {
-  const name =
-    (typeof options.name === "string" ? options.name : null) || nameParts.join(" ");
+  const name = (typeof options.name === "string" ? options.name : null) || nameParts.join(" ");
   const trimmedName = name.trim();
   if (!trimmedName) {
     throw new Error(
-      "usage: repo create --name <name> [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--empty|--opentool] [--token] [--auto-schedule-migration <true|false>]"
+      "usage: repo create --name <name> [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--empty|--opentool] [--token] [--auto-schedule-migration <true|false>]",
     );
   }
 
@@ -1062,10 +1216,7 @@ async function runRepoCreate(
   const isEmpty = nonGitEntries.length === 0;
   const force = parseBooleanOption(options.yes) || parseBooleanOption(options.force);
   if (!isEmpty && !force) {
-    const proceed = await promptConfirm(
-      `Directory is not empty (${repoPath}). Continue?`,
-      false
-    );
+    const proceed = await promptConfirm(`Directory is not empty (${repoPath}). Continue?`, false);
     if (!proceed) {
       console.log("aborted");
       return;
@@ -1083,7 +1234,7 @@ async function runRepoCreate(
     const result = await runCommand("git", ["init"], { cwd: repoPath });
     if (result.code !== 0) {
       throw new Error(
-        `git init failed: ${result.stderr.trim() || result.stdout.trim() || "unknown error"}`
+        `git init failed: ${result.stderr.trim() || result.stdout.trim() || "unknown error"}`,
       );
     }
   }
@@ -1092,7 +1243,7 @@ async function runRepoCreate(
   if (originUrl && !force) {
     const proceed = await promptConfirm(
       `Remote "origin" already set (${originUrl}). Replace it?`,
-      false
+      false,
     );
     if (!proceed) {
       console.log("aborted");
@@ -1100,8 +1251,7 @@ async function runRepoCreate(
     }
   }
 
-  const repoInit =
-    options.opentool === "true" ? "opentool" : "empty";
+  const repoInit = options.opentool === "true" ? "opentool" : "empty";
   const deployOnPush = parseBooleanOption(options.deployOnPush);
   const autoScheduleMigrationOption = options.autoScheduleMigration;
   const autoScheduleMigrationSpecified =
@@ -1132,9 +1282,9 @@ async function runRepoCreate(
   const remoteResult = await runCommand("git", remoteArgs, { cwd: repoPath });
   if (remoteResult.code !== 0) {
     throw new Error(
-      `git remote failed: ${
-        redactToken(remoteResult.stderr.trim() || remoteResult.stdout.trim() || "unknown error")
-      }`
+      `git remote failed: ${redactToken(
+        remoteResult.stderr.trim() || remoteResult.stdout.trim() || "unknown error",
+      )}`,
     );
   }
 
@@ -1144,14 +1294,14 @@ async function runRepoCreate(
     console.log(`repo: ${response.gitOwner}/${response.gitRepo}`);
   }
   console.log(`remote: ${displayRemote}`);
-  console.log("next: git add . && git commit -m \"init\"");
+  console.log('next: git add . && git commit -m "init"');
   const defaultBranch = response.defaultBranch || "master";
   console.log(`next: openpond repo push --path ${repoPath} --branch ${defaultBranch}`);
   if (!useTokenRemote) {
     console.log(
       `token-remote (non-interactive): git -C ${repoPath} remote set-url origin ${formatTokenizedRepoUrlForPrint(
-        repoUrl
-      )}`
+        repoUrl,
+      )}`,
     );
   }
 
@@ -1217,25 +1367,22 @@ async function runRepoPush(options: Record<string, string | boolean>): Promise<v
   process.env.GIT_TERMINAL_PROMPT = "0";
   try {
     if (!alreadyTokenized) {
-      const setResult = await runCommand(
-        "git",
-        ["remote", "set-url", "origin", tokenRemote],
-        { cwd: repoPath }
-      );
+      const setResult = await runCommand("git", ["remote", "set-url", "origin", tokenRemote], {
+        cwd: repoPath,
+      });
       if (setResult.code !== 0) {
         throw new Error(
-          `git remote set-url failed: ${
-            redactToken(setResult.stderr.trim() || setResult.stdout.trim() || "unknown error")
-          }`
+          `git remote set-url failed: ${redactToken(
+            setResult.stderr.trim() || setResult.stdout.trim() || "unknown error",
+          )}`,
         );
       }
     }
 
-    const pushResult = await runCommand(
-      "git",
-      ["push", "-u", "origin", resolvedBranch],
-      { cwd: repoPath, inherit: true }
-    );
+    const pushResult = await runCommand("git", ["push", "-u", "origin", resolvedBranch], {
+      cwd: repoPath,
+      inherit: true,
+    });
     if (pushResult.code !== 0) {
       throw new Error("git push failed");
     }
@@ -1337,8 +1484,44 @@ async function runAppsList(options: Record<string, string | boolean>): Promise<v
     const repo = app.repo || app.gitRepo || app.id;
     const status = app.latestDeployment?.status || "no-deploy";
     const branch = app.latestDeployment?.gitBranch || app.defaultBranch || "-";
-    console.log(`${owner}/${repo}  ${status}  ${branch}  ${app.id}`);
+    const codeVisibility = app.codeVisibility || "unknown";
+    console.log(
+      `${owner}/${repo}  ${status}  ${branch}  code=${codeVisibility}  ${app.id}`,
+    );
   }
+}
+
+async function runAppsCodeVisibility(
+  options: Record<string, string | boolean>,
+  target: string,
+): Promise<void> {
+  const visibility =
+    typeof options.visibility === "string"
+      ? options.visibility.trim()
+      : typeof options.codeVisibility === "string"
+      ? options.codeVisibility.trim()
+      : "";
+
+  if (visibility !== "public" && visibility !== "private") {
+    throw new Error(
+      "usage: apps code-visibility <handle>/<repo> --visibility public|private",
+    );
+  }
+
+  const config = await loadConfig();
+  const uiBase = resolveBaseUrl(config);
+  const apiBase = resolvePublicApiBaseUrl(config);
+  const apiKey = await ensureApiKey(config, uiBase);
+  const { app, handle, repo } = await resolveAppTarget(apiBase, apiKey, target);
+  const result = await updateAppCodeVisibility(
+    apiBase,
+    apiKey,
+    app.id,
+    visibility,
+  );
+  console.log(
+    `${handle}/${repo} code_visibility=${result.app?.codeVisibility ?? visibility} app_id=${app.id}`,
+  );
 }
 
 async function runAppsPerformance(options: Record<string, string | boolean>): Promise<void> {
@@ -1353,7 +1536,7 @@ async function runAppsPerformance(options: Record<string, string | boolean>): Pr
 
 async function runAppsSummary(
   _options: Record<string, string | boolean>,
-  target: string
+  target: string,
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
@@ -1368,11 +1551,10 @@ async function runAppsAssistant(
   options: Record<string, string | boolean>,
   mode: "plan" | "performance",
   target: string,
-  contentParts: string[]
+  contentParts: string[],
 ): Promise<void> {
   const prompt =
-    (typeof options.prompt === "string" ? options.prompt : null) ||
-    contentParts.join(" ");
+    (typeof options.prompt === "string" ? options.prompt : null) || contentParts.join(" ");
   if (!prompt.trim()) {
     throw new Error("usage: apps assistant <plan|performance> <handle>/<repo> --prompt <text>");
   }
@@ -1392,15 +1574,14 @@ async function runAppsAssistant(
 
 async function runAppsAgentCreate(
   options: Record<string, string | boolean>,
-  contentParts: string[]
+  contentParts: string[],
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
   const apiBase = resolvePublicApiBaseUrl(config);
   const prompt =
-    (typeof options.prompt === "string" ? options.prompt : null) ||
-    contentParts.join(" ");
+    (typeof options.prompt === "string" ? options.prompt : null) || contentParts.join(" ");
   if (!prompt.trim()) {
     throw new Error("usage: apps agent create --prompt <text>");
   }
@@ -1508,7 +1689,7 @@ async function runAppsToolsExecute(
   options: Record<string, string | boolean>,
   appId: string,
   deploymentId: string,
-  toolName: string
+  toolName: string,
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
@@ -1524,9 +1705,7 @@ async function runAppsToolsExecute(
     throw new Error("method must be GET, POST, PUT, or DELETE");
   }
   const body =
-    typeof options.body === "string"
-      ? parseJsonOption(String(options.body), "body")
-      : undefined;
+    typeof options.body === "string" ? parseJsonOption(String(options.body), "body") : undefined;
   const headers =
     typeof options.headers === "string"
       ? (parseJsonOption(String(options.headers), "headers") as Record<string, string>)
@@ -1555,7 +1734,7 @@ async function runAppsToolsExecute(
 
 async function runAppsEnvSet(
   options: Record<string, string | boolean>,
-  target: string
+  target: string,
 ): Promise<void> {
   const rawEnv =
     typeof options.env === "string"
@@ -1588,13 +1767,15 @@ async function runAppsEnvSet(
   const apiBase = resolvePublicApiBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
   const { app } = await resolveAppTarget(apiBase, apiKey, target);
-  const result = await updateAppEnvironment(apiBase, apiKey, app.id, { envVars });
+  const result = await updateAppEnvironment(apiBase, apiKey, app.id, {
+    envVars,
+  });
   console.log(JSON.stringify(result, null, 2));
 }
 
 async function runAppsEnvGet(
   _options: Record<string, string | boolean>,
-  target: string
+  target: string,
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
@@ -1607,7 +1788,7 @@ async function runAppsEnvGet(
 
 async function runAppsDeploy(
   options: Record<string, string | boolean>,
-  target: string
+  target: string,
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
@@ -1640,9 +1821,7 @@ async function runAppsDeploy(
   });
 }
 
-async function runAppsPositionsTx(
-  options: Record<string, string | boolean>
-): Promise<void> {
+async function runAppsPositionsTx(options: Record<string, string | boolean>): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
@@ -1678,7 +1857,7 @@ async function runAppsPositionsTx(
 }
 
 function resolveStoreEventsParams(
-  options: Record<string, string | boolean>
+  options: Record<string, string | boolean>,
 ): Record<string, string> | undefined {
   let params: Record<string, string> = {};
   if (typeof options.params === "string") {
@@ -1700,7 +1879,7 @@ function resolveStoreEventsParams(
   addParam("source", typeof options.source === "string" ? options.source.trim() : undefined);
   addParam(
     "walletAddress",
-    typeof options.walletAddress === "string" ? options.walletAddress.trim() : undefined
+    typeof options.walletAddress === "string" ? options.walletAddress.trim() : undefined,
   );
   addParam("symbol", typeof options.symbol === "string" ? options.symbol.trim() : undefined);
   addParam("cursor", typeof options.cursor === "string" ? options.cursor.trim() : undefined);
@@ -1724,7 +1903,7 @@ function resolveStoreEventsParams(
 }
 
 function resolveBacktestEventsParams(
-  options: Record<string, string | boolean>
+  options: Record<string, string | boolean>,
 ): Record<string, string> | undefined {
   let params: Record<string, string> = {};
   if (typeof options.params === "string") {
@@ -1746,7 +1925,7 @@ function resolveBacktestEventsParams(
   addParam("source", typeof options.source === "string" ? options.source.trim() : undefined);
   addParam(
     "walletAddress",
-    typeof options.walletAddress === "string" ? options.walletAddress.trim() : undefined
+    typeof options.walletAddress === "string" ? options.walletAddress.trim() : undefined,
   );
   addParam("symbol", typeof options.symbol === "string" ? options.symbol.trim() : undefined);
   addParam("cursor", typeof options.cursor === "string" ? options.cursor.trim() : undefined);
@@ -1757,7 +1936,7 @@ function resolveBacktestEventsParams(
       ? options.runId.trim()
       : typeof options.backtestRunId === "string"
         ? options.backtestRunId.trim()
-        : undefined
+        : undefined,
   );
   addParam("since", parseTimeOption(options.since, "since"));
   addParam("until", parseTimeOption(options.until, "until"));
@@ -1773,9 +1952,7 @@ function resolveBacktestEventsParams(
   return Object.keys(params).length ? params : undefined;
 }
 
-async function runAppsStoreEvents(
-  options: Record<string, string | boolean>
-): Promise<void> {
+async function runAppsStoreEvents(options: Record<string, string | boolean>): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
@@ -1790,7 +1967,7 @@ async function runAppsStoreEvents(
 
 async function runBacktestEvents(
   options: Record<string, string | boolean>,
-  target: string
+  target: string,
 ): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
@@ -1810,7 +1987,7 @@ async function runBacktestEvents(
 
 async function runBacktestGet(
   options: Record<string, string | boolean>,
-  target: string
+  target: string,
 ): Promise<void> {
   const runId =
     typeof options.runId === "string"
@@ -1834,9 +2011,7 @@ async function runBacktestGet(
   console.log(JSON.stringify(result, null, 2));
 }
 
-async function runAppsTradeFacts(
-  options: Record<string, string | boolean>
-): Promise<void> {
+async function runAppsTradeFacts(options: Record<string, string | boolean>): Promise<void> {
   const config = await loadConfig();
   const uiBase = resolveBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
@@ -1853,6 +2028,1841 @@ async function runAppsTradeFacts(
     return;
   }
   console.log(JSON.stringify(performance, null, 2));
+}
+
+async function resolveSandboxClient(
+  options: Record<string, string | boolean>,
+): Promise<OpenPondSandboxClient> {
+  const config = await loadConfig();
+  const uiBase = resolveBaseUrl(config);
+  const apiKey = await ensureApiKey(config, uiBase);
+  const sandboxApiUrl =
+    resolveSandboxApiUrlOption(options) || process.env.OPENPOND_SANDBOX_API_URL?.trim() || null;
+  return createOpenPondSandboxClient(
+    sandboxApiUrl
+      ? { apiKey, sandboxApiUrl }
+      : { apiKey, baseUrl: resolveSandboxBaseUrl(config, options) },
+  );
+}
+
+function formatSandboxLine(sandbox: SandboxRecord): string {
+  const mppMode = sandbox.reservation.mpp?.mode ?? "no-mpp";
+  const captured = sandbox.reservation.capturedUsd;
+  const budget = sandbox.budget.maxUsd;
+  const repo = sandbox.repo ?? "-";
+  return [
+    sandbox.id,
+    sandbox.state,
+    sandbox.runtimeDriver,
+    `spent=${captured}/${budget}`,
+    mppMode,
+    repo,
+  ].join("  ");
+}
+
+function formatSnapshotCatalogLine(snapshot: {
+  id: string;
+  kind: string;
+  sandboxId: string;
+  name: string;
+  storage: string | null;
+  sizeGb: number | null;
+  template?: {
+    name: string;
+    version: string;
+  } | null;
+  replay?: {
+    state?: string | null;
+    retention?: {
+      class?: string | null;
+    } | null;
+  } | null;
+  storageCost?: {
+    estimatedMonthlyUsd: string | null;
+    retentionClass: string | null;
+  } | null;
+  createdAt: string;
+}): string {
+  const template = snapshot.template
+    ? `${snapshot.template.name}@${snapshot.template.version}`
+    : "-";
+  const retention =
+    snapshot.replay?.retention?.class ??
+    snapshot.storageCost?.retentionClass ??
+    "-";
+  const replayState = snapshot.replay?.state ?? "-";
+  const monthlyUsd = snapshot.storageCost?.estimatedMonthlyUsd ?? "-";
+  return [
+    snapshot.id,
+    snapshot.kind,
+    snapshot.name,
+    snapshot.sandboxId,
+    `storage=${snapshot.storage ?? "-"}`,
+    `sizeGb=${snapshot.sizeGb ?? "-"}`,
+    `template=${template}`,
+    `replay=${replayState}`,
+    `retention=${retention}`,
+    `monthlyUsd=${monthlyUsd}`,
+    snapshot.createdAt,
+  ].join("  ");
+}
+
+function formatSandboxTemplateLine(template: {
+  snapshotId: string;
+  sandboxId: string;
+  name: string;
+  version: string;
+  visibility: string;
+  useCase: string | null;
+  tags?: string[];
+  replay?: {
+    state?: string | null;
+    retention?: {
+      class?: string | null;
+    } | null;
+  } | null;
+  storageCost?: {
+    estimatedMonthlyUsd: string | null;
+    retentionClass: string | null;
+  } | null;
+  createdAt: string;
+}): string {
+  const tags = template.tags && template.tags.length > 0 ? template.tags.join(",") : "-";
+  const retention =
+    template.replay?.retention?.class ??
+    template.storageCost?.retentionClass ??
+    "-";
+  const replayState = template.replay?.state ?? "-";
+  const monthlyUsd = template.storageCost?.estimatedMonthlyUsd ?? "-";
+  return [
+    template.name,
+    `version=${template.version}`,
+    `snapshot=${template.snapshotId}`,
+    `sandbox=${template.sandboxId}`,
+    `visibility=${template.visibility}`,
+    `useCase=${template.useCase ?? "-"}`,
+    `tags=${tags}`,
+    `replay=${replayState}`,
+    `retention=${retention}`,
+    `monthlyUsd=${monthlyUsd}`,
+    template.createdAt,
+  ].join("  ");
+}
+
+function formatOrganizationLine(organization: OpenPondOrganization): string {
+  return [
+    organization.slug,
+    `team=${organization.teamId}`,
+    `role=${organization.role}`,
+    `status=${organization.status}`,
+    organization.displayName,
+  ].join("  ");
+}
+
+function formatOrganizationMemberLine(member: OpenPondOrganizationMember): string {
+  return [
+    member.email ?? member.userId,
+    `user=${member.userId}`,
+    `role=${member.role}`,
+    member.createdAt,
+  ].join("  ");
+}
+
+function formatOrganizationMcpServerLine(
+  server: OpenPondOrganizationMcpServer | null,
+): string {
+  if (!server) return "no mcp server configured";
+  return [
+    server.slug,
+    `team=${server.teamId}`,
+    `status=${server.status}`,
+    `tools=${server.toolset.join(",") || "-"}`,
+    server.resourceUrl,
+  ].join("  ");
+}
+
+function formatTemplateBuildLine(build: SandboxTemplateBuildRecord): string {
+  return [
+    build.id,
+    `team=${build.teamId}`,
+    `status=${build.status}`,
+    `publish=${build.publishStatus ?? "-"}`,
+    `source=${build.sourceRepoUrl}`,
+    `branch=${build.sourceBranch}`,
+    `snapshot=${build.snapshotId ?? "-"}`,
+    `error=${build.error ?? "-"}`,
+    build.createdAt ?? "-",
+  ].join("  ");
+}
+
+function normalizeSnapshotValidationCleanup(
+  value: unknown,
+): SandboxSnapshotValidateInput["cleanup"] | undefined {
+  if (typeof value !== "string") return undefined;
+  const cleanup = value.trim();
+  if (cleanup === "delete" || cleanup === "stop" || cleanup === "archive") {
+    return cleanup;
+  }
+  throw new Error("snapshot-validate --cleanup must be delete, stop, or archive");
+}
+
+function buildSandboxCreateInput(options: Record<string, string | boolean>): SandboxCreateInput {
+  const repo = typeof options.repo === "string" ? options.repo.trim() : "";
+  const command =
+    typeof options.command === "string" && options.command.trim()
+      ? options.command.trim()
+      : undefined;
+  const budgetUsd =
+    typeof options.budgetUsd === "string" && options.budgetUsd.trim()
+      ? options.budgetUsd.trim()
+      : typeof options.budget === "string" && options.budget.trim()
+        ? options.budget.trim()
+        : "0.05";
+  const cpu = parseNumberOption(options.cpu, "cpu");
+  const memoryGb = parseNumberOption(options.memoryGb, "memory-gb");
+  const diskGb = parseNumberOption(options.diskGb, "disk-gb");
+  const maxDurationSeconds = parseIntegerOption(options.maxDurationSeconds, "max-duration-seconds");
+  const idleTimeoutSeconds = parseIntegerOption(options.idleTimeoutSeconds, "idle-timeout-seconds");
+  const integrationConnection =
+    typeof options.integrationConnection === "string"
+      ? options.integrationConnection.trim()
+      : "";
+  const integrationCapabilities = parseCsvOption(options.integrationCapabilities);
+  const integrationScopes = parseCsvOption(options.integrationScopes);
+  const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+  const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+
+  if (integrationConnection && integrationCapabilities.length === 0) {
+    throw new Error("integration-capabilities is required with integration-connection");
+  }
+
+  return {
+    ...(repo ? { repo } : {}),
+    ...(teamId ? { teamId } : {}),
+    ...(appId ? { appId } : {}),
+    ...(command ? { command } : {}),
+    resources: {
+      ...(cpu !== undefined ? { cpu } : {}),
+      ...(memoryGb !== undefined ? { memoryGb } : {}),
+      ...(diskGb !== undefined ? { diskGb } : {}),
+    },
+    budget: { maxUsd: budgetUsd },
+    quotas: {
+      maxSpendUsd: budgetUsd,
+      ...(maxDurationSeconds !== undefined ? { maxDurationSeconds } : {}),
+      ...(idleTimeoutSeconds !== undefined ? { idleTimeoutSeconds } : {}),
+    },
+    ...(integrationConnection
+      ? {
+          integrationConnectionLeases: [
+            {
+              connectionId: integrationConnection,
+              ...(integrationScopes.length > 0
+                ? { scopes: integrationScopes }
+                : {}),
+              capabilities: integrationCapabilities,
+              ttlSeconds: 60 * 60,
+            },
+          ],
+        }
+      : {}),
+    metadata: {
+      source: "openpond-code",
+    },
+  };
+}
+
+function buildSandboxIntegrationAttachInput(
+  options: Record<string, string | boolean>,
+): SandboxIntegrationConnectionLeaseInput {
+  const connectionId =
+    typeof options.integrationConnection === "string"
+      ? options.integrationConnection.trim()
+      : "";
+  const capabilities = parseCsvOption(options.integrationCapabilities);
+  const scopes = parseCsvOption(options.integrationScopes);
+  if (!connectionId || capabilities.length === 0) {
+    throw new Error(
+      "usage: sandbox integration-attach <sandboxId> --integration-connection <id> --integration-capabilities <csv>",
+    );
+  }
+  return {
+    connectionId,
+    ...(scopes.length > 0 ? { scopes } : {}),
+    capabilities,
+    ttlSeconds: 60 * 60,
+  };
+}
+
+function parseOrganizationRole(value: string | boolean | undefined): OpenPondOrganizationRole {
+  const role = typeof value === "string" ? value.trim() : "";
+  if (role === "owner" || role === "admin" || role === "member") {
+    return role;
+  }
+  throw new Error("role must be owner, admin, or member");
+}
+
+function buildOrganizationCreateInput(
+  options: Record<string, string | boolean>,
+): OpenPondOrganizationCreateInput {
+  const displayName =
+    typeof options.displayName === "string" && options.displayName.trim()
+      ? options.displayName.trim()
+      : typeof options.name === "string" && options.name.trim()
+        ? options.name.trim()
+        : "";
+  if (!displayName) {
+    throw new Error("usage: organizations create --name <name> [--slug <slug>]");
+  }
+  return {
+    displayName,
+    ...(typeof options.slug === "string" && options.slug.trim()
+      ? { slug: options.slug.trim() }
+      : {}),
+    ...(typeof options.primaryContactEmail === "string" && options.primaryContactEmail.trim()
+      ? { primaryContactEmail: options.primaryContactEmail.trim() }
+      : {}),
+    ...(typeof options.customDomain === "string" && options.customDomain.trim()
+      ? { customDomain: options.customDomain.trim() }
+      : {}),
+  };
+}
+
+function buildOrganizationUpdateInput(
+  options: Record<string, string | boolean>,
+): OpenPondOrganizationUpdateInput {
+  const input: OpenPondOrganizationUpdateInput = {};
+  const displayName =
+    typeof options.displayName === "string" && options.displayName.trim()
+      ? options.displayName.trim()
+      : typeof options.name === "string" && options.name.trim()
+        ? options.name.trim()
+        : "";
+  if (displayName) input.displayName = displayName;
+  if (typeof options.slug === "string" && options.slug.trim()) {
+    input.slug = options.slug.trim();
+  }
+  if (typeof options.primaryContactEmail === "string") {
+    input.primaryContactEmail = options.primaryContactEmail.trim() || null;
+  }
+  if (typeof options.customDomain === "string") {
+    input.customDomain = options.customDomain.trim() || null;
+  }
+  if (typeof options.status === "string" && options.status.trim()) {
+    const status = options.status.trim();
+    if (status !== "active" && status !== "disabled" && status !== "archived") {
+      throw new Error("status must be active, disabled, or archived");
+    }
+    input.status = status;
+  }
+  if (Object.keys(input).length === 0) {
+    throw new Error("organizations update requires at least one changed field");
+  }
+  return input;
+}
+
+function buildOrganizationMemberInput(
+  options: Record<string, string | boolean>,
+): OpenPondOrganizationMemberUpsertInput {
+  const email = typeof options.email === "string" ? options.email.trim() : "";
+  if (!email) {
+    throw new Error("usage: organizations member-upsert <slug> --email <email> --role <role>");
+  }
+  return {
+    email,
+    role: parseOrganizationRole(options.role),
+  };
+}
+
+function buildOrganizationMcpGenerateInput(
+  options: Record<string, string | boolean>,
+): OpenPondOrganizationMcpGenerateInput {
+  return {
+    ...(typeof options.origin === "string" && options.origin.trim()
+      ? { origin: options.origin.trim() }
+      : {}),
+    ...(typeof options.toolset === "string" && options.toolset.trim()
+      ? { toolset: parseCsvOption(options.toolset) }
+      : {}),
+  };
+}
+
+function buildTemplateBuildCreateInput(
+  options: Record<string, string | boolean>,
+): SandboxTemplateBuildCreateInput {
+  const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+  const sourceRepoUrl =
+    typeof options.sourceRepoUrl === "string" ? options.sourceRepoUrl.trim() : "";
+  const sourceAppId =
+    typeof options.sourceAppId === "string" ? options.sourceAppId.trim() : "";
+  const branch = typeof options.branch === "string" ? options.branch.trim() : "";
+  const manifestPath =
+    typeof options.manifestPath === "string" ? options.manifestPath.trim() : "";
+  if (!teamId) {
+    throw new Error("template-build-create requires --team-id <id>");
+  }
+  if (!sourceRepoUrl && !sourceAppId) {
+    throw new Error("template-build-create requires --source-repo-url <url> or --source-app-id <id>");
+  }
+  return {
+    teamId,
+    ...(sourceRepoUrl ? { sourceRepoUrl } : {}),
+    ...(sourceAppId ? { sourceAppId } : {}),
+    ...(branch ? { branch } : {}),
+    ...(manifestPath ? { manifestPath } : {}),
+    publish: parseBooleanOption(options.publish),
+  };
+}
+
+function buildSnapshotCreateInput(
+  options: Record<string, string | boolean>,
+): Record<string, unknown> {
+  const name = typeof options.name === "string" ? options.name.trim() : "";
+  if (!name) {
+    throw new Error("snapshot-create requires --name <name>");
+  }
+  const templateName =
+    typeof options.templateName === "string" ? options.templateName.trim() : "";
+  const templateVersion =
+    typeof options.templateVersion === "string" && options.templateVersion.trim()
+      ? options.templateVersion.trim()
+      : "0.1.0";
+  const templateVisibility =
+    typeof options.templateVisibility === "string" && options.templateVisibility.trim()
+      ? options.templateVisibility.trim()
+      : "private";
+  if (
+    templateVisibility !== "private" &&
+    templateVisibility !== "team"
+  ) {
+    throw new Error("template-visibility must be private or team");
+  }
+  const validationCommand =
+    typeof options.validationCommand === "string" && options.validationCommand.trim()
+      ? options.validationCommand.trim()
+      : "test -d .";
+  const entrypointCommand =
+    typeof options.entrypointCommand === "string" && options.entrypointCommand.trim()
+      ? options.entrypointCommand.trim()
+      : "true";
+  const useCase =
+    typeof options.useCase === "string" && options.useCase.trim()
+      ? options.useCase.trim()
+      : undefined;
+  const description =
+    typeof options.description === "string" && options.description.trim()
+      ? options.description.trim()
+      : undefined;
+  const tags = parseCsvOption(options.tags);
+  const input: Record<string, unknown> = {
+    ...(parseBooleanOption(options.async) ? { async: true } : {}),
+    name,
+    replay: {
+      entrypoints: [
+        {
+          command: entrypointCommand,
+          name: "default",
+        },
+      ],
+      retention: {
+        class: "pinned",
+      },
+      safety: {
+        cleanup: "delete",
+        idleTimeoutSeconds: 600,
+        internetEgress: "block",
+        maxDurationSeconds: 600,
+        maxSpendUsd: "0.05",
+        publicPreview: false,
+      },
+      validation: {
+        commands: [
+          {
+            command: validationCommand,
+          },
+        ],
+      },
+    },
+  };
+  if (templateName) {
+    input.template = {
+      name: templateName,
+      version: templateVersion,
+      ...(description ? { description } : {}),
+      ...(tags.length > 0 ? { tags } : {}),
+      visibility: templateVisibility,
+      ...(useCase ? { useCase } : {}),
+    };
+  }
+  return input;
+}
+
+function summarizeSandbox(sandbox: SandboxRecord): Record<string, unknown> {
+  return {
+    id: sandbox.id,
+    state: sandbox.state,
+    runtimeDriver: sandbox.runtimeDriver,
+    repo: sandbox.repo,
+    budgetUsd: sandbox.budget.maxUsd,
+    capturedUsd: sandbox.reservation.capturedUsd,
+    reservationRef: sandbox.reservation.mpp?.reservationRef ?? null,
+    mppMode: sandbox.reservation.mpp?.mode ?? null,
+    integrationLeases: sandbox.integrationLeases?.map((lease) => ({
+      leaseId: lease.leaseId,
+      provider: lease.provider,
+      capabilities: lease.capabilities,
+    })) ?? [],
+    previewPorts: sandbox.previewPorts.map((preview) => ({
+      port: preview.port,
+      label: preview.label,
+      url: preview.url,
+      customDomain: preview.customDomain ?? null,
+    })),
+    latestReceipt: sandbox.receipts.at(-1)?.mpp.receiptRef ?? null,
+  };
+}
+
+async function runOrganizationsCommand(
+  options: Record<string, string | boolean>,
+  rest: string[],
+): Promise<void> {
+  const subcommand = rest[0] || "list";
+  const client = await resolveSandboxClient(options);
+  const outputJson = parseBooleanOption(options.json);
+
+  if (subcommand === "list") {
+    const organizations = await client.listOrganizations();
+    if (outputJson) {
+      console.log(JSON.stringify({ organizations }, null, 2));
+      return;
+    }
+    if (organizations.length === 0) {
+      console.log("no organizations found");
+      return;
+    }
+    for (const organization of organizations) {
+      console.log(formatOrganizationLine(organization));
+    }
+    return;
+  }
+
+  if (subcommand === "create") {
+    const organization = await client.createOrganization(buildOrganizationCreateInput(options));
+    console.log(JSON.stringify({ organization }, null, 2));
+    return;
+  }
+
+  if (subcommand === "get") {
+    const slug = rest[1];
+    if (!slug) {
+      throw new Error("usage: organizations get <slug>");
+    }
+    const organization = await client.getOrganization(slug);
+    console.log(JSON.stringify({ organization }, null, 2));
+    return;
+  }
+
+  if (subcommand === "update") {
+    const slug = rest[1];
+    if (!slug) {
+      throw new Error("usage: organizations update <slug> [--name <name>]");
+    }
+    const organization = await client.updateOrganization(
+      slug,
+      buildOrganizationUpdateInput(options),
+    );
+    console.log(JSON.stringify({ organization }, null, 2));
+    return;
+  }
+
+  if (subcommand === "members" || subcommand === "member-list") {
+    const slug = rest[1];
+    if (!slug) {
+      throw new Error("usage: organizations members <slug>");
+    }
+    const members = await client.listOrganizationMembers(slug);
+    if (outputJson) {
+      console.log(JSON.stringify({ members }, null, 2));
+      return;
+    }
+    if (members.length === 0) {
+      console.log("no organization members found");
+      return;
+    }
+    for (const member of members) {
+      console.log(formatOrganizationMemberLine(member));
+    }
+    return;
+  }
+
+  if (subcommand === "member-upsert" || subcommand === "member-add") {
+    const slug = rest[1];
+    if (!slug) {
+      throw new Error("usage: organizations member-upsert <slug> --email <email> --role <role>");
+    }
+    const member = await client.upsertOrganizationMember(
+      slug,
+      buildOrganizationMemberInput(options),
+    );
+    console.log(JSON.stringify({ member }, null, 2));
+    return;
+  }
+
+  if (subcommand === "mcp-get" || subcommand === "mcp-server") {
+    const slug = rest[1];
+    if (!slug) {
+      throw new Error("usage: organizations mcp-get <slug>");
+    }
+    const mcpServer = await client.getOrganizationMcpServer(slug);
+    if (outputJson) {
+      console.log(JSON.stringify({ mcpServer }, null, 2));
+      return;
+    }
+    console.log(formatOrganizationMcpServerLine(mcpServer));
+    return;
+  }
+
+  if (subcommand === "mcp-generate") {
+    const slug = rest[1];
+    if (!slug) {
+      throw new Error("usage: organizations mcp-generate <slug> [--origin <url>]");
+    }
+    const mcpServer = await client.generateOrganizationMcpServer(
+      slug,
+      buildOrganizationMcpGenerateInput(options),
+    );
+    console.log(JSON.stringify({ mcpServer }, null, 2));
+    return;
+  }
+
+  if (
+    subcommand === "mcp-rotate" ||
+    subcommand === "mcp-disable" ||
+    subcommand === "mcp-enable"
+  ) {
+    const slug = rest[1];
+    if (!slug) {
+      throw new Error(`usage: organizations ${subcommand} <slug>`);
+    }
+    const mcpServer =
+      subcommand === "mcp-rotate"
+        ? await client.rotateOrganizationMcpServer(slug)
+        : subcommand === "mcp-disable"
+          ? await client.disableOrganizationMcpServer(slug)
+          : await client.enableOrganizationMcpServer(slug);
+    console.log(JSON.stringify({ mcpServer }, null, 2));
+    return;
+  }
+
+  throw new Error(
+    "usage: organizations <list|create|get|update|members|member-upsert|mcp-get|mcp-generate|mcp-rotate|mcp-disable|mcp-enable> [args]",
+  );
+}
+
+async function runSandboxCommand(
+  options: Record<string, string | boolean>,
+  rest: string[],
+): Promise<void> {
+  const subcommand = rest[0] || "list";
+  const client = await resolveSandboxClient(options);
+
+  if (subcommand === "list") {
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const sandboxes = await client.list({
+      ...(teamId ? { teamId } : {}),
+      ...(appId ? { appId } : {}),
+    });
+    if (sandboxes.length === 0) {
+      console.log("no sandboxes found");
+      return;
+    }
+    for (const sandbox of sandboxes) {
+      console.log(formatSandboxLine(sandbox));
+    }
+    return;
+  }
+
+  if (subcommand === "mcp-config" || subcommand === "mcp-url") {
+    const config = client.mcpServerConfig();
+    console.log(
+      JSON.stringify(
+        {
+          ...config,
+          headers: {
+            "openpond-api-key": "set OPENPOND_API_KEY or use your saved openpond profile",
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "snapshots" || subcommand === "snapshot-catalog") {
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const query =
+      typeof options.query === "string" && options.query.trim()
+        ? options.query.trim()
+        : typeof options.q === "string" && options.q.trim()
+          ? options.q.trim()
+          : "";
+    const tag = typeof options.tag === "string" ? options.tag.trim() : "";
+    const useCase = typeof options.useCase === "string" ? options.useCase.trim() : "";
+    const replayState =
+      typeof options.replayState === "string" ? options.replayState.trim() : "";
+    const catalog = await client.snapshotCatalog({
+      ...(teamId ? { teamId } : {}),
+      ...(appId ? { appId } : {}),
+      ...(query ? { q: query } : {}),
+      ...(tag ? { tag } : {}),
+      ...(useCase ? { useCase } : {}),
+      ...(replayState === "draft" ||
+      replayState === "validated" ||
+      replayState === "published"
+        ? { replayState }
+        : {}),
+    });
+    if (catalog.snapshots.length === 0) {
+      console.log("no sandbox snapshots found");
+      return;
+    }
+    for (const snapshot of catalog.snapshots) {
+      console.log(formatSnapshotCatalogLine(snapshot));
+    }
+    return;
+  }
+
+  if (subcommand === "templates" || subcommand === "template-catalog") {
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const query =
+      typeof options.query === "string" && options.query.trim()
+        ? options.query.trim()
+        : typeof options.q === "string" && options.q.trim()
+          ? options.q.trim()
+          : "";
+    const name =
+      typeof options.name === "string" && options.name.trim()
+        ? options.name.trim()
+        : typeof options.templateName === "string" && options.templateName.trim()
+          ? options.templateName.trim()
+          : "";
+    const version = typeof options.version === "string" ? options.version.trim() : "";
+    const tag = typeof options.tag === "string" ? options.tag.trim() : "";
+    const useCase = typeof options.useCase === "string" ? options.useCase.trim() : "";
+    const catalog = await client.templates({
+      ...(teamId ? { teamId } : {}),
+      ...(appId ? { appId } : {}),
+      ...(query ? { q: query } : {}),
+      ...(name ? { name } : {}),
+      ...(version ? { version } : {}),
+      ...(tag ? { tag } : {}),
+      ...(useCase ? { useCase } : {}),
+    });
+    if (catalog.templates.length === 0) {
+      console.log("no sandbox templates found");
+      return;
+    }
+    for (const template of catalog.templates) {
+      console.log(formatSandboxTemplateLine(template));
+    }
+    return;
+  }
+
+  if (subcommand === "template-builds" || subcommand === "template-build-list") {
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    if (!teamId) {
+      throw new Error("usage: sandbox template-builds --team-id <id>");
+    }
+    const builds = await client.listTemplateBuilds({ teamId });
+    if (parseBooleanOption(options.json)) {
+      console.log(JSON.stringify({ builds }, null, 2));
+      return;
+    }
+    if (builds.length === 0) {
+      console.log("no sandbox template builds found");
+      return;
+    }
+    for (const build of builds) {
+      console.log(formatTemplateBuildLine(build));
+    }
+    return;
+  }
+
+  if (subcommand === "template-build-create" || subcommand === "create-template-build") {
+    const build = await client.createTemplateBuild(buildTemplateBuildCreateInput(options));
+    console.log(JSON.stringify({ build }, null, 2));
+    return;
+  }
+
+  if (subcommand === "template-build-get" || subcommand === "get-template-build") {
+    const buildId = rest[1];
+    if (!buildId) {
+      throw new Error("usage: sandbox template-build-get <buildId>");
+    }
+    const build = await client.getTemplateBuild(buildId);
+    console.log(JSON.stringify({ build }, null, 2));
+    return;
+  }
+
+  if (subcommand === "template-build-logs" || subcommand === "template-build-log") {
+    const buildId = rest[1];
+    if (!buildId) {
+      throw new Error("usage: sandbox template-build-logs <buildId>");
+    }
+    const logs = await client.getTemplateBuildLogs(buildId);
+    if (parseBooleanOption(options.json)) {
+      console.log(JSON.stringify(logs, null, 2));
+      return;
+    }
+    for (const line of logs.logs) {
+      console.log(line);
+    }
+    return;
+  }
+
+  if (subcommand === "template-build-cancel" || subcommand === "cancel-template-build") {
+    const buildId = rest[1];
+    if (!buildId) {
+      throw new Error("usage: sandbox template-build-cancel <buildId>");
+    }
+    const build = await client.cancelTemplateBuild(buildId);
+    console.log(JSON.stringify({ build }, null, 2));
+    return;
+  }
+
+  if (subcommand === "template-build-watch" || subcommand === "watch-template-build") {
+    const buildId = rest[1];
+    if (!buildId) {
+      throw new Error("usage: sandbox template-build-watch <buildId>");
+    }
+    const intervalMs = parseIntegerOption(options.intervalMs, "interval-ms") ?? 5000;
+    const timeoutMs = parseIntegerOption(options.timeoutMs, "timeout-ms") ?? 15 * 60 * 1000;
+    const startedAt = Date.now();
+    const seenLogs = new Set<string>();
+    while (Date.now() - startedAt <= timeoutMs) {
+      const [build, logs] = await Promise.all([
+        client.getTemplateBuild(buildId),
+        client.getTemplateBuildLogs(buildId),
+      ]);
+      for (const line of logs.logs) {
+        if (!seenLogs.has(line)) {
+          seenLogs.add(line);
+          console.log(line);
+        }
+      }
+      if (
+        build.status === "succeeded" ||
+        build.status === "failed" ||
+        build.status === "cancelled"
+      ) {
+        console.log(formatTemplateBuildLine(build));
+        if (build.status !== "succeeded") {
+          throw new Error(`sandbox template build ${build.status}: ${build.error ?? "no error"}`);
+        }
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    throw new Error(`sandbox template build did not finish within ${timeoutMs}ms`);
+  }
+
+  if (subcommand === "template-launch" || subcommand === "launch-template") {
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const snapshotId =
+      typeof options.snapshotId === "string" && options.snapshotId.trim()
+        ? options.snapshotId.trim()
+        : typeof options.snapshot === "string" && options.snapshot.trim()
+          ? options.snapshot.trim()
+          : "";
+    const templateName =
+      typeof options.templateName === "string" && options.templateName.trim()
+        ? options.templateName.trim()
+        : typeof options.name === "string" && options.name.trim()
+          ? options.name.trim()
+          : typeof rest[1] === "string" && rest[1].trim()
+            ? rest[1].trim()
+            : "";
+    const version = typeof options.version === "string" ? options.version.trim() : "";
+    const useCase = typeof options.useCase === "string" ? options.useCase.trim() : "";
+    if (!snapshotId && !templateName && !useCase) {
+      throw new Error(
+        "usage: sandbox template-launch [--snapshot-id <id>|--template-name <name>|--use-case <id>] [--version <v>]",
+      );
+    }
+    const budgetUsd =
+      typeof options.budgetUsd === "string" && options.budgetUsd.trim()
+        ? options.budgetUsd.trim()
+        : typeof options.budget === "string" && options.budget.trim()
+          ? options.budget.trim()
+          : "";
+    const result = await client.launchTemplate({
+      ...(teamId ? { teamId } : {}),
+      ...(appId ? { appId } : {}),
+      ...(snapshotId ? { snapshotId } : {}),
+      ...(templateName ? { templateName } : {}),
+      ...(version ? { version } : {}),
+      ...(useCase ? { useCase } : {}),
+      ...(budgetUsd ? { budget: { maxUsd: budgetUsd } } : {}),
+      metadata: {
+        source: "openpond-code-template-launch",
+      },
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (subcommand === "snapshot-fork" || subcommand === "fork-snapshot") {
+    const snapshotId = rest[1];
+    if (!snapshotId) {
+      throw new Error("snapshot-fork requires <snapshotId>");
+    }
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const budgetUsd =
+      typeof options.budgetUsd === "string" && options.budgetUsd.trim()
+        ? options.budgetUsd.trim()
+        : typeof options.budget === "string" && options.budget.trim()
+          ? options.budget.trim()
+          : "";
+    const result = await client.forkSnapshot(snapshotId, {
+      ...(teamId ? { teamId } : {}),
+      ...(appId ? { appId } : {}),
+      ...(budgetUsd ? { budget: { maxUsd: budgetUsd } } : {}),
+      metadata: {
+        source: "openpond-code-snapshot-fork",
+        templateSnapshotId: snapshotId,
+      },
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (subcommand === "snapshot-create" || subcommand === "create-snapshot") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error("usage: sandbox snapshot-create <sandboxId> --name <name>");
+    }
+    const result = await client.createSnapshot(
+      sandboxId,
+      buildSnapshotCreateInput(options),
+    );
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (subcommand === "snapshot-validate" || subcommand === "validate-snapshot") {
+    const sandboxId = rest[1];
+    const snapshotId = rest[2];
+    if (!sandboxId || !snapshotId) {
+      throw new Error("snapshot-validate requires <sandboxId> <snapshotId>");
+    }
+    const cleanup = normalizeSnapshotValidationCleanup(options.cleanup);
+    const result = await client.validateSnapshot(sandboxId, snapshotId, {
+      ...(cleanup ? { cleanup } : {}),
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (subcommand === "snapshot-publish" || subcommand === "publish-snapshot") {
+    const sandboxId = rest[1];
+    const snapshotId = rest[2];
+    if (!sandboxId || !snapshotId) {
+      throw new Error("snapshot-publish requires <sandboxId> <snapshotId>");
+    }
+    const result = await client.publishSnapshot(sandboxId, snapshotId);
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (subcommand === "integration-connections") {
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const status =
+      options.status === "active" ||
+      options.status === "revoked" ||
+      options.status === "error" ||
+      options.status === "all"
+        ? options.status
+        : undefined;
+    const result = await client.integrationConnections({
+      ...(teamId ? { teamId } : {}),
+      ...(appId ? { appId } : {}),
+      ...(status ? { status } : {}),
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (subcommand === "create") {
+    const sandbox = await client.create(buildSandboxCreateInput(options));
+    console.log(JSON.stringify({ sandbox: summarizeSandbox(sandbox) }, null, 2));
+    return;
+  }
+
+  if (subcommand === "exec") {
+    const sandboxId = rest[1];
+    const command =
+      (typeof options.command === "string" ? options.command : null) || rest.slice(2).join(" ");
+    if (!sandboxId || !command.trim()) {
+      throw new Error("usage: sandbox exec <sandboxId> --command <command>");
+    }
+    const timeoutSeconds = parseIntegerOption(options.timeoutSeconds, "timeout-seconds");
+    const result = await client.exec(sandboxId, {
+      command: command.trim(),
+      ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          command: result.command,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "port" || subcommand === "preview") {
+    const sandboxId = rest[1];
+    const port = parseIntegerOption(options.port, "port");
+    if (!sandboxId || port === undefined) {
+      throw new Error("usage: sandbox port <sandboxId> --port <port>");
+    }
+    const label = typeof options.label === "string" ? options.label : undefined;
+    const rawAccess = typeof options.access === "string" ? options.access.trim() : "";
+    if (rawAccess && rawAccess !== "private" && rawAccess !== "public") {
+      throw new Error("sandbox port --access must be private or public");
+    }
+    const access = rawAccess === "public" ? "public" : "private";
+    const customDomain =
+      typeof options.domain === "string" ? options.domain.trim() : "";
+    const authToken = typeof options.authToken === "string" ? options.authToken : "";
+    const authHeader = typeof options.authHeader === "string" ? options.authHeader.trim() : "";
+    const authHeaderValue =
+      typeof options.authHeaderValue === "string" ? options.authHeaderValue : "";
+    if (authToken && (authHeader || authHeaderValue)) {
+      throw new Error("sandbox port auth options must use either --auth-token or --auth-header with --auth-header-value");
+    }
+    if ((authHeader && !authHeaderValue) || (!authHeader && authHeaderValue)) {
+      throw new Error("sandbox port custom header auth requires both --auth-header and --auth-header-value");
+    }
+    const result = await client.openPort(sandboxId, {
+      port,
+      ...(label ? { label } : {}),
+      access,
+      ...(options["auto-start"] || options.autoStart ? { autoStart: true } : {}),
+      ...(customDomain ? { customDomain } : {}),
+      ...(authToken
+        ? { authPolicy: { mode: "bearer", token: authToken } as const }
+        : {}),
+      ...(authHeader && authHeaderValue
+        ? {
+            authPolicy: {
+              mode: "header",
+              headerName: authHeader,
+              headerValue: authHeaderValue,
+            } as const,
+          }
+        : {}),
+    });
+    console.log(JSON.stringify(result.preview, null, 2));
+    return;
+  }
+
+  if (subcommand === "stop") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error("usage: sandbox stop <sandboxId>");
+    }
+    const result = await client.stop(sandboxId);
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          receipt: result.receipt,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "delete") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error("usage: sandbox delete <sandboxId>");
+    }
+    const sandbox = await client.delete(sandboxId);
+    console.log(JSON.stringify({ sandbox: summarizeSandbox(sandbox) }, null, 2));
+    return;
+  }
+
+  if (subcommand === "receipts") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error("usage: sandbox receipts <sandboxId>");
+    }
+    const receipts = await client.receipts(sandboxId);
+    console.log(JSON.stringify({ receipts }, null, 2));
+    return;
+  }
+
+  if (subcommand === "logs") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error("usage: sandbox logs <sandboxId>");
+    }
+    const logs = await client.logs(sandboxId);
+    for (const line of logs) {
+      console.log(line);
+    }
+    return;
+  }
+
+  if (subcommand === "process-start") {
+    const sandboxId = rest[1];
+    const command =
+      (typeof options.command === "string" ? options.command : null) || rest.slice(2).join(" ");
+    if (!sandboxId || !command.trim()) {
+      throw new Error("usage: sandbox process-start <sandboxId> --command <command>");
+    }
+    const timeoutSeconds = parseIntegerOption(options.timeoutSeconds, "timeout-seconds");
+    const result = await client.startProcess(sandboxId, {
+      command: command.trim(),
+      ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          process: result.process,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "process-list") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error("usage: sandbox process-list <sandboxId>");
+    }
+    const result = await client.listProcesses(sandboxId);
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          processes: result.processes,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "process-get") {
+    const sandboxId = rest[1];
+    const processId = rest[2];
+    if (!sandboxId || !processId) {
+      throw new Error("usage: sandbox process-get <sandboxId> <processId> [--since <cursor>]");
+    }
+    const since = parseIntegerOption(options.since, "since");
+    const result = await client.getProcess(sandboxId, processId, {
+      ...(since !== undefined ? { since } : {}),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          process: result.process,
+          output: result.output,
+          cursor: result.cursor,
+          completed: result.completed,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "process-stop") {
+    const sandboxId = rest[1];
+    const processId = rest[2];
+    if (!sandboxId || !processId) {
+      throw new Error("usage: sandbox process-stop <sandboxId> <processId>");
+    }
+    const result = await client.stopProcess(sandboxId, processId);
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          process: result.process,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "process-stream") {
+    const sandboxId = rest[1];
+    const processId = rest[2];
+    if (!sandboxId || !processId) {
+      throw new Error("usage: sandbox process-stream <sandboxId> <processId> [--since <cursor>]");
+    }
+    const since = parseIntegerOption(options.since, "since");
+    await client.streamProcessOutput(sandboxId, processId, {
+      ...(since !== undefined ? { since } : {}),
+    });
+    return;
+  }
+
+  if (subcommand === "pty-start") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error("usage: sandbox pty-start <sandboxId> [--command <command>]");
+    }
+    const command =
+      (typeof options.command === "string" ? options.command : null) || rest.slice(2).join(" ");
+    const timeoutSeconds = parseIntegerOption(options.timeoutSeconds, "timeout-seconds");
+    const rows = parseIntegerOption(options.rows, "rows");
+    const cols = parseIntegerOption(options.cols, "cols");
+    const result = await client.startPty(sandboxId, {
+      ...(command.trim() ? { command: command.trim() } : {}),
+      ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
+      ...(rows !== undefined ? { rows } : {}),
+      ...(cols !== undefined ? { cols } : {}),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          pty: result.pty,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "pty-list") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error("usage: sandbox pty-list <sandboxId>");
+    }
+    const result = await client.listPtys(sandboxId);
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          ptys: result.ptys,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "pty-get") {
+    const sandboxId = rest[1];
+    const ptyId = rest[2];
+    if (!sandboxId || !ptyId) {
+      throw new Error("usage: sandbox pty-get <sandboxId> <ptyId> [--since <cursor>]");
+    }
+    const since = parseIntegerOption(options.since, "since");
+    const result = await client.getPty(sandboxId, ptyId, {
+      ...(since !== undefined ? { since } : {}),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          pty: result.pty,
+          output: result.output,
+          cursor: result.cursor,
+          completed: result.completed,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "pty-write") {
+    const sandboxId = rest[1];
+    const ptyId = rest[2];
+    const inputBase64 =
+      typeof options.inputBase64 === "string" ? options.inputBase64.trim() : "";
+    const inputText =
+      (typeof options.input === "string" ? options.input : null) || rest.slice(3).join(" ");
+    if (!sandboxId || !ptyId || (!inputBase64 && !inputText)) {
+      throw new Error("usage: sandbox pty-write <sandboxId> <ptyId> --input <text>");
+    }
+    const result = await client.writePtyInput(
+      sandboxId,
+      ptyId,
+      inputBase64 ? { dataBase64: inputBase64 } : inputText,
+    );
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          pty: result.pty,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "pty-stop") {
+    const sandboxId = rest[1];
+    const ptyId = rest[2];
+    if (!sandboxId || !ptyId) {
+      throw new Error("usage: sandbox pty-stop <sandboxId> <ptyId>");
+    }
+    const result = await client.stopPty(sandboxId, ptyId);
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          pty: result.pty,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "pty-stream") {
+    const sandboxId = rest[1];
+    const ptyId = rest[2];
+    if (!sandboxId || !ptyId) {
+      throw new Error("usage: sandbox pty-stream <sandboxId> <ptyId> [--since <cursor>]");
+    }
+    const since = parseIntegerOption(options.since, "since");
+    await client.streamPtyOutput(sandboxId, ptyId, {
+      ...(since !== undefined ? { since } : {}),
+    });
+    return;
+  }
+
+  if (subcommand === "list-files") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error("usage: sandbox list-files <sandboxId> [--path <path>]");
+    }
+    const path = typeof options.path === "string" ? options.path.trim() : undefined;
+    const maxEntries = parseNumberOption(options.maxEntries, "max-entries");
+    const recursive =
+      options.recursive !== undefined ? parseBooleanOption(options.recursive) : undefined;
+    const result = await client.listFiles(sandboxId, {
+      ...(path ? { path } : {}),
+      ...(recursive !== undefined ? { recursive } : {}),
+      ...(maxEntries !== undefined ? { maxEntries } : {}),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          files: result.files,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "upload-file") {
+    const sandboxId = rest[1];
+    const path = typeof options.path === "string" ? options.path.trim() : "";
+    const contents =
+      typeof options.contents === "string"
+        ? options.contents
+        : typeof options.content === "string"
+          ? options.content
+          : "";
+    if (!sandboxId || !path) {
+      throw new Error('usage: sandbox upload-file <sandboxId> --path <path> --contents "text"');
+    }
+    const result = await client.uploadFile(sandboxId, path, contents);
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          file: result.file,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "download-file") {
+    const sandboxId = rest[1];
+    const path = typeof options.path === "string" ? options.path.trim() : "";
+    const offsetBytes = Number(options["offset-bytes"]);
+    const maxBytes = Number(options["max-bytes"]);
+    if (!sandboxId || !path) {
+      throw new Error("usage: sandbox download-file <sandboxId> --path <path>");
+    }
+    const result = await client.downloadFileResponse(sandboxId, {
+      path,
+      ...(Number.isFinite(offsetBytes) ? { offsetBytes } : {}),
+      ...(Number.isFinite(maxBytes) ? { maxBytes } : {}),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          file: result.file,
+          contents: Buffer.from(result.file.contentsBase64, "base64").toString("utf-8"),
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "search-files") {
+    const sandboxId = rest[1];
+    const query = typeof options.query === "string" ? options.query.trim() : "";
+    if (!sandboxId || !query) {
+      throw new Error("usage: sandbox search-files <sandboxId> --query <text> [--path <path>]");
+    }
+    const path = typeof options.path === "string" ? options.path.trim() : undefined;
+    const maxResults = parseNumberOption(options.maxResults, "max-results");
+    const result = await client.searchFiles(sandboxId, {
+      query,
+      ...(path ? { path } : {}),
+      ...(maxResults !== undefined ? { maxResults } : {}),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          matches: result.matches,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "delete-file") {
+    const sandboxId = rest[1];
+    const path = typeof options.path === "string" ? options.path.trim() : "";
+    if (!sandboxId || !path) {
+      throw new Error("usage: sandbox delete-file <sandboxId> --path <path> [--recursive]");
+    }
+    const result = await client.deleteFile(sandboxId, path, {
+      recursive: parseBooleanOption(options.recursive),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          deleted: result.deleted,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "stat-file") {
+    const sandboxId = rest[1];
+    const path = typeof options.path === "string" ? options.path.trim() : "";
+    if (!sandboxId || !path) {
+      throw new Error("usage: sandbox stat-file <sandboxId> --path <path>");
+    }
+    const result = await client.statFile(sandboxId, path);
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          file: result.file,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "mkdir") {
+    const sandboxId = rest[1];
+    const path = typeof options.path === "string" ? options.path.trim() : "";
+    if (!sandboxId || !path) {
+      throw new Error("usage: sandbox mkdir <sandboxId> --path <path> [--recursive false]");
+    }
+    const result = await client.mkdir(sandboxId, {
+      path,
+      recursive:
+        options.recursive !== undefined ? parseBooleanOption(options.recursive) : undefined,
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          directory: result.directory,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "move-file") {
+    const sandboxId = rest[1];
+    const fromPath = typeof options.fromPath === "string" ? options.fromPath.trim() : "";
+    const toPath = typeof options.toPath === "string" ? options.toPath.trim() : "";
+    if (!sandboxId || !fromPath || !toPath) {
+      throw new Error(
+        "usage: sandbox move-file <sandboxId> --from-path <path> --to-path <path> [--overwrite]",
+      );
+    }
+    const result = await client.moveFile(sandboxId, {
+      fromPath,
+      toPath,
+      overwrite: parseBooleanOption(options.overwrite),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          moved: result.moved,
+          file: result.file,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "git-status") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error("usage: sandbox git-status <sandboxId>");
+    }
+    const result = await client.gitStatus(sandboxId);
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          status: result.status,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "billing") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error("usage: sandbox billing <sandboxId>");
+    }
+    const result = await client.billing(sandboxId);
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          billing: result.billing,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "integration-leases") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error("usage: sandbox integration-leases <sandboxId>");
+    }
+    const result = await client.integrationLeases(sandboxId);
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          integrationLeases: result.integrationLeases,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "integration-attach") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error(
+        "usage: sandbox integration-attach <sandboxId> --integration-connection <id> --integration-capabilities <csv>",
+      );
+    }
+    const result = await client.attachIntegrationConnection(
+      sandboxId,
+      buildSandboxIntegrationAttachInput(options),
+    );
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          integrationLeases: result.integrationLeases,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "integration-remove") {
+    const sandboxId = rest[1];
+    const leaseId = typeof options.leaseId === "string" ? options.leaseId.trim() : "";
+    if (!sandboxId || !leaseId) {
+      throw new Error("usage: sandbox integration-remove <sandboxId> --lease-id <id>");
+    }
+    const result = await client.removeIntegrationLease(sandboxId, leaseId);
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          integrationLeases: result.integrationLeases,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "git-diff") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error("usage: sandbox git-diff <sandboxId> [--base-ref <ref>]");
+    }
+    const baseRef =
+      typeof options.baseRef === "string" && options.baseRef.trim()
+        ? options.baseRef.trim()
+        : undefined;
+    const result = await client.gitDiff(sandboxId, {
+      ...(baseRef ? { baseRef } : {}),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          diff: result.diff,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "git-branch") {
+    const sandboxId = rest[1];
+    const branch = typeof options.branch === "string" ? options.branch.trim() : "";
+    const startPoint =
+      typeof options.startPoint === "string" && options.startPoint.trim()
+        ? options.startPoint.trim()
+        : undefined;
+    if (!sandboxId || !branch) {
+      throw new Error(
+        "usage: sandbox git-branch <sandboxId> --branch <name> [--create] [--start-point <ref>]",
+      );
+    }
+    const result = await client.gitBranch(sandboxId, {
+      branch,
+      create: parseBooleanOption(options.create),
+      ...(startPoint ? { startPoint } : {}),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          branch: result.branch,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "git-commit") {
+    const sandboxId = rest[1];
+    const message = typeof options.message === "string" ? options.message.trim() : "";
+    const all = parseBooleanOption(options.all);
+    const rawPaths =
+      typeof options.paths === "string"
+        ? options.paths
+        : typeof options.path === "string"
+          ? options.path
+          : "";
+    const paths = rawPaths
+      .split(",")
+      .map((path) => path.trim())
+      .filter(Boolean);
+    if (!sandboxId || !message || (!all && paths.length === 0)) {
+      throw new Error(
+        'usage: sandbox git-commit <sandboxId> --message "..." [--all|--paths <csv>]',
+      );
+    }
+    const result = await client.gitCommit(sandboxId, {
+      message,
+      ...(all ? { all: true } : { paths }),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          commit: result.commit,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "git-pull") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error(
+        "usage: sandbox git-pull <sandboxId> [--remote origin] [--branch main] [--rebase|--ff-only false]",
+      );
+    }
+    const remote =
+      typeof options.remote === "string" && options.remote.trim()
+        ? options.remote.trim()
+        : undefined;
+    const branch =
+      typeof options.branch === "string" && options.branch.trim()
+        ? options.branch.trim()
+        : undefined;
+    const result = await client.gitPull(sandboxId, {
+      ...(remote ? { remote } : {}),
+      ...(branch ? { branch } : {}),
+      ...(options.rebase !== undefined ? { rebase: parseBooleanOption(options.rebase) } : {}),
+      ...(options.ffOnly !== undefined ? { ffOnly: parseBooleanOption(options.ffOnly) } : {}),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          pull: result.pull,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "git-push") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error(
+        "usage: sandbox git-push <sandboxId> [--remote origin] [--branch main] [--set-upstream] [--force-with-lease]",
+      );
+    }
+    const remote =
+      typeof options.remote === "string" && options.remote.trim()
+        ? options.remote.trim()
+        : undefined;
+    const branch =
+      typeof options.branch === "string" && options.branch.trim()
+        ? options.branch.trim()
+        : undefined;
+    const result = await client.gitPush(sandboxId, {
+      ...(remote ? { remote } : {}),
+      ...(branch ? { branch } : {}),
+      ...(options.setUpstream !== undefined
+        ? { setUpstream: parseBooleanOption(options.setUpstream) }
+        : {}),
+      ...(options.forceWithLease !== undefined
+        ? { forceWithLease: parseBooleanOption(options.forceWithLease) }
+        : {}),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          push: result.push,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "smoke") {
+    const repo = typeof options.repo === "string" ? options.repo.trim() : undefined;
+    const budgetUsd =
+      typeof options.budgetUsd === "string"
+        ? options.budgetUsd.trim()
+        : typeof options.budget === "string"
+          ? options.budget.trim()
+          : undefined;
+    const keep = parseBooleanOption(options.keep);
+    const preview =
+      options.preview !== undefined
+        ? parseBooleanOption(options.preview)
+        : !parseBooleanOption(options.noPreview);
+    const smokeOptions: SandboxSmokeOptions = {
+      ...(repo ? { repo } : {}),
+      ...(budgetUsd ? { budgetUsd } : {}),
+      keep,
+      preview,
+    };
+    const cpu = parseNumberOption(options.cpu, "cpu");
+    const memoryGb = parseNumberOption(options.memoryGb, "memory-gb");
+    const diskGb = parseNumberOption(options.diskGb, "disk-gb");
+    if (cpu !== undefined) smokeOptions.cpu = cpu;
+    if (memoryGb !== undefined) smokeOptions.memoryGb = memoryGb;
+    if (diskGb !== undefined) smokeOptions.diskGb = diskGb;
+    const summary = await client.smoke(smokeOptions);
+    console.log(JSON.stringify(summary, null, 2));
+    return;
+  }
+
+  throw new Error(
+    "usage: sandbox <list|mcp-config|snapshots|templates|template-launch|snapshot-fork|snapshot-validate|snapshot-publish|create|exec|port|preview|stop|delete|receipts|logs|billing|process-start|process-list|process-get|process-stop|process-stream|pty-start|pty-list|pty-get|pty-write|pty-stop|pty-stream|upload-file|download-file|list-files|search-files|delete-file|stat-file|mkdir|move-file|git-status|git-diff|git-branch|git-commit|git-pull|git-push|smoke> [args]",
+  );
 }
 
 async function main() {
@@ -1874,7 +3884,7 @@ async function main() {
     return;
   }
 
-  if (options.version !== undefined || command === "version") {
+  if ((options.version !== undefined && !command) || command === "version") {
     console.log(getInstalledCliVersion());
     return;
   }
@@ -1933,7 +3943,7 @@ async function main() {
       const toolName = rest[2];
       if (!target || !toolName) {
         throw new Error(
-          "usage: backtest run <handle>/<repo> <tool> [--body <json>] [--branch <branch>] [--deployment-id <id>]"
+          "usage: backtest run <handle>/<repo> <tool> [--body <json>] [--branch <branch>] [--deployment-id <id>]",
         );
       }
       await runBacktestRun(options, target, toolName);
@@ -1942,9 +3952,7 @@ async function main() {
     if (subcommand === "events") {
       const target = rest[1];
       if (!target) {
-        throw new Error(
-          "usage: backtest events <handle>/<repo> [--run-id <id>] [--limit <n>]"
-        );
+        throw new Error("usage: backtest events <handle>/<repo> [--run-id <id>] [--limit <n>]");
       }
       await runBacktestEvents(options, target);
       return;
@@ -1957,9 +3965,7 @@ async function main() {
       await runBacktestGet(options, target);
       return;
     }
-    throw new Error(
-      "usage: backtest <run|events|get> <handle>/<repo> [args]"
-    );
+    throw new Error("usage: backtest <run|events|get> <handle>/<repo> [args]");
   }
 
   if (command === "deploy") {
@@ -1980,7 +3986,7 @@ async function main() {
     const target = rest[1];
     if (!target) {
       throw new Error(
-        "usage: template <status|branches|update> <handle>/<repo> [--env preview|production]"
+        "usage: template <status|branches|update> <handle>/<repo> [--env preview|production]",
       );
     }
     if (subcommand === "status") {
@@ -1996,7 +4002,7 @@ async function main() {
       return;
     }
     throw new Error(
-      "usage: template <status|branches|update> <handle>/<repo> [--env preview|production]"
+      "usage: template <status|branches|update> <handle>/<repo> [--env preview|production]",
     );
   }
 
@@ -2010,15 +4016,31 @@ async function main() {
       await runRepoPush(options);
       return;
     }
-    throw new Error(
-      "usage: repo <create|push> [--name <name>] [--path <dir>] [--branch <branch>]"
-    );
+    throw new Error("usage: repo <create|push> [--name <name>] [--path <dir>] [--branch <branch>]");
+  }
+
+  if (command === "organization" || command === "organizations") {
+    await runOrganizationsCommand(options, rest);
+    return;
+  }
+
+  if (command === "sandbox") {
+    await runSandboxCommand(options, rest);
+    return;
   }
 
   if (command === "apps") {
     const subcommand = rest[0];
     if (subcommand === "list") {
       await runAppsList(options);
+      return;
+    }
+    if (subcommand === "code-visibility") {
+      const target = rest[1];
+      if (!target) {
+        throw new Error("usage: apps code-visibility <handle>/<repo> --visibility public|private");
+      }
+      await runAppsCodeVisibility(options, target);
       return;
     }
     if (subcommand === "tools") {
@@ -2028,7 +4050,7 @@ async function main() {
         const toolName = rest[4];
         if (!appId || !deploymentId || !toolName) {
           throw new Error(
-            "usage: apps tools execute <appId> <deploymentId> <tool> [--body <json>]"
+            "usage: apps tools execute <appId> <deploymentId> <tool> [--body <json>]",
           );
         }
         await runAppsToolsExecute(options, appId, deploymentId, toolName);
@@ -2040,9 +4062,7 @@ async function main() {
     if (subcommand === "deploy") {
       const target = rest[1];
       if (!target) {
-        throw new Error(
-          "usage: apps deploy <handle>/<repo> [--env preview|production] [--watch]"
-        );
+        throw new Error("usage: apps deploy <handle>/<repo> [--env preview|production] [--watch]");
       }
       await runAppsDeploy(options, target);
       return;
@@ -2079,9 +4099,7 @@ async function main() {
       const mode = rest[1];
       const target = rest[2];
       if ((mode !== "plan" && mode !== "performance") || !target) {
-        throw new Error(
-          "usage: apps assistant <plan|performance> <handle>/<repo> --prompt <text>"
-        );
+        throw new Error("usage: apps assistant <plan|performance> <handle>/<repo> --prompt <text>");
       }
       await runAppsAssistant(options, mode, target, rest.slice(3));
       return;
@@ -2103,7 +4121,7 @@ async function main() {
       return;
     }
     throw new Error(
-      "usage: apps <list|tools|deploy|env get|env set|performance|summary|assistant|store events|trade-facts|agent create|positions tx> [args]"
+      "usage: apps <list|code-visibility|tools|deploy|env get|env set|performance|summary|assistant|store events|trade-facts|agent create|positions tx> [args]",
     );
   }
 

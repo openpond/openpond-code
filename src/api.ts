@@ -16,6 +16,7 @@ import type {
   AppEnvironmentUpdateRequest,
   AppEnvironmentUpdateResponse,
   AppEnvironmentGetResponse,
+  AppCodeVisibilityUpdateResponse,
   AppScheduleSummary,
   AppListItem,
   AppRuntimeSummary,
@@ -87,6 +88,7 @@ export type {
   AppEnvironmentUpdateRequest,
   AppEnvironmentUpdateResponse,
   AppEnvironmentGetResponse,
+  AppCodeVisibilityUpdateResponse,
   AppScheduleSummary,
   AppListItem,
   AppRuntimeSummary,
@@ -223,6 +225,28 @@ export async function createRepo(
     throw new Error(`Repo create failed: ${response.status} ${text}`);
   }
   return (await response.json()) as CreateRepoResponse;
+}
+
+export async function updateAppCodeVisibility(
+  apiBase: string,
+  apiKey: string,
+  appId: string,
+  codeVisibility: "public" | "private"
+): Promise<AppCodeVisibilityUpdateResponse> {
+  const response = await apiFetch(
+    apiBase,
+    apiKey,
+    `/apps/${encodeURIComponent(appId)}/code-visibility`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ codeVisibility }),
+    }
+  );
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Code visibility update failed: ${response.status} ${text}`);
+  }
+  return (await response.json()) as AppCodeVisibilityUpdateResponse;
 }
 
 export async function createHeadlessApps(
