@@ -757,7 +757,7 @@ function printHelp(): void {
   console.log("  openpond template branches <handle>/<repo>");
   console.log("  openpond template update <handle>/<repo> [--env preview|production]");
   console.log(
-    "  openpond repo create --name <name> [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--env <json>] [--empty|--opentool] [--token] [--auto-schedule-migration <true|false>]",
+    "  openpond repo create --name <name> [--team-id <id>] [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--env <json>] [--empty|--opentool] [--token] [--auto-schedule-migration <true|false>]",
   );
   console.log("  openpond repo push [--path <dir>] [--branch <branch>]");
   console.log("  openpond organizations list");
@@ -850,7 +850,7 @@ function printHelp(): void {
     "  openpond apps store events [--source <source>] [--status <csv>] [--symbol <symbol>] [--wallet-address <0x...>] [--since <ms|iso>] [--until <ms|iso>] [--limit <n>] [--cursor <cursor>] [--history <true|false>] [--params <json>]",
   );
   console.log("  openpond apps trade-facts [--app-id <id>]");
-  console.log("  openpond apps agent create --prompt <text> [--template-id <id>]");
+  console.log("  openpond apps agent create --prompt <text> [--team-id <id>] [--template-id <id>]");
   console.log(
     "  openpond apps tools execute <appId> <deploymentId> <tool> [--body <json>] [--method <METHOD>] [--headers <json>] [--summary <true|false>]",
   );
@@ -1132,7 +1132,7 @@ async function runRepoCreate(
   const trimmedName = name.trim();
   if (!trimmedName) {
     throw new Error(
-      "usage: repo create --name <name> [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--empty|--opentool] [--token] [--auto-schedule-migration <true|false>]",
+      "usage: repo create --name <name> [--team-id <id>] [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--empty|--opentool] [--token] [--auto-schedule-migration <true|false>]",
     );
   }
 
@@ -1140,6 +1140,10 @@ async function runRepoCreate(
   const uiBase = resolveBaseUrl(config);
   const apiKey = await ensureApiKey(config, uiBase);
   const apiBase = resolvePublicApiBaseUrl(config);
+  const teamId =
+    typeof options.teamId === "string" && options.teamId.trim()
+      ? options.teamId.trim()
+      : undefined;
 
   const templateInput = typeof options.template === "string" ? options.template.trim() : "";
   if (templateInput && (options.empty === "true" || options.opentool === "true")) {
@@ -1175,15 +1179,20 @@ async function runRepoCreate(
       console.warn("deploy-on-push is not used for template create (auto deploys)");
     }
     const templateRepoUrl = normalizeTemplateRepoUrl(templateInput, uiBase);
-    const response = await createHeadlessApps(apiBase, apiKey, [
-      {
-        name: trimmedName,
-        ...(description ? { description } : {}),
-        templateRepoUrl,
-        ...(templateBranch ? { templateBranch } : {}),
-        ...(envVars ? { envVars } : {}),
-      },
-    ]);
+    const response = await createHeadlessApps(
+      apiBase,
+      apiKey,
+      [
+        {
+          name: trimmedName,
+          ...(description ? { description } : {}),
+          templateRepoUrl,
+          ...(templateBranch ? { templateBranch } : {}),
+          ...(envVars ? { envVars } : {}),
+        },
+      ],
+      teamId,
+    );
     const item = response.items?.[0];
     if (!item || item.status !== "ok" || !item.appId) {
       throw new Error(item?.error || "Template create failed");
@@ -1274,6 +1283,7 @@ async function runRepoCreate(
 
   const response = await createRepo(apiBase, apiKey, {
     name: trimmedName,
+    ...(teamId ? { teamId } : {}),
     ...(description ? { description } : {}),
     ...(repoInit ? { repoInit } : {}),
     ...(envVars ? { envVars } : {}),
@@ -1594,7 +1604,7 @@ async function runAppsAgentCreate(
   const prompt =
     (typeof options.prompt === "string" ? options.prompt : null) || contentParts.join(" ");
   if (!prompt.trim()) {
-    throw new Error("usage: apps agent create --prompt <text>");
+    throw new Error("usage: apps agent create --prompt <text> [--team-id <id>]");
   }
   const templateRepoUrl =
     typeof options.templateRepoUrl === "string" ? options.templateRepoUrl : undefined;
@@ -1602,6 +1612,10 @@ async function runAppsAgentCreate(
     typeof options.templateBranch === "string" ? options.templateBranch : undefined;
   const templateLocalPath =
     typeof options.templateLocalPath === "string" ? options.templateLocalPath : undefined;
+  const teamId =
+    typeof options.teamId === "string" && options.teamId.trim()
+      ? options.teamId.trim()
+      : undefined;
   if (templateLocalPath && String(templateLocalPath).trim().length > 0) {
     throw new Error("templateLocalPath is not supported; use templateRepoUrl");
   }
@@ -1642,6 +1656,7 @@ async function runAppsAgentCreate(
 
   const response = await createAgentFromPrompt(apiBase, apiKey, {
     prompt: prompt.trim(),
+    ...(teamId ? { teamId } : {}),
     ...(template ? { template } : {}),
     ...(deployEnvironment ? { deployEnvironment } : {}),
     ...(deployDisabled !== undefined ? { deployDisabled } : {}),

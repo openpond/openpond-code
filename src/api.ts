@@ -252,11 +252,12 @@ export async function updateAppCodeVisibility(
 export async function createHeadlessApps(
   baseUrl: string,
   token: string,
-  items: HeadlessAppRequest[]
+  items: HeadlessAppRequest[],
+  teamId?: string
 ): Promise<HeadlessAppsResponse> {
   const response = await apiFetch(baseUrl, token, "/v4/apps/headless", {
     method: "POST",
-    body: JSON.stringify({ items }),
+    body: JSON.stringify({ items, ...(teamId ? { teamId } : {}) }),
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");

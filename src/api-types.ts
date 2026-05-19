@@ -12,6 +12,7 @@ export type ToolManifest = {
 
 export type CreateLocalProjectInput = {
   name: string;
+  teamId?: string;
   templateRepoUrl?: string;
   templateBranch?: string;
   envVars?: Record<string, string>;
@@ -19,6 +20,7 @@ export type CreateLocalProjectInput = {
 
 export type CreateRepoRequest = {
   name: string;
+  teamId?: string;
   description?: string;
   repoInit?: "opentool" | "empty";
   templateRepoUrl?: string;
@@ -38,6 +40,7 @@ export type CreateRepoResponse = {
 };
 
 export type HeadlessAppRequest = {
+  teamId?: string;
   name?: string;
   description?: string;
   templateRepoUrl?: string;
@@ -609,6 +612,7 @@ export type AssistantRunResponse = {
 
 export type AgentCreateRequest = {
   prompt: string;
+  teamId?: string;
   template?: {
     name?: string;
     description?: string;
