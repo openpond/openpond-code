@@ -760,6 +760,7 @@ function printHelp(): void {
   console.log("  openpond organizations members <slug>");
   console.log("  openpond organizations member-upsert <slug> --email <email> --role owner|admin|member");
   console.log("  openpond organizations mcp-generate <slug> [--origin <url>] [--toolset <csv>]");
+  console.log("  openpond organizations mcp-probe <slug> [--origin <url>] [--tool <name>] [--arguments <json>] [--access-token <token>]");
   console.log("  openpond sandbox list [--env staging] [--sandbox-api-url <url>]");
   console.log("  openpond sandbox mcp-config [--env staging] [--sandbox-api-url <url>]");
   console.log("  openpond sandbox snapshots [--team-id <id>] [--app-id <id>]");
@@ -2181,6 +2182,217 @@ function formatOrganizationMcpServerLine(
   ].join("  ");
 }
 
+type McpProbeHttpResult = {
+  url: string;
+  status: number;
+  ok: boolean;
+  headers: {
+    contentType: string | null;
+    location: string | null;
+    wwwAuthenticate: string | null;
+  };
+  body: unknown;
+};
+
+function normalizeMcpResourceUrl(url: string): string {
+  const trimmed = url.trim().replace(/\/$/, "");
+  if (!trimmed) {
+    throw new Error("MCP resource URL must be non-empty");
+  }
+  const parsed = new URL(trimmed);
+  return parsed.toString().replace(/\/$/, "");
+}
+
+function resolveMcpProbeResourceUrl(
+  server: OpenPondOrganizationMcpServer | null,
+  options: Record<string, string | boolean>,
+): string {
+  const explicit =
+    typeof options.resourceUrl === "string" && options.resourceUrl.trim()
+      ? options.resourceUrl.trim()
+      : typeof options.url === "string" && options.url.trim()
+        ? options.url.trim()
+        : "";
+  if (explicit) {
+    return normalizeMcpResourceUrl(explicit);
+  }
+  if (!server?.resourceUrl) {
+    throw new Error("organization does not have an MCP server; run organizations mcp-generate first");
+  }
+  return normalizeMcpResourceUrl(server.resourceUrl);
+}
+
+function resolveMcpProbeOrigin(
+  resourceUrl: string,
+  options: Record<string, string | boolean>,
+): string {
+  const explicit =
+    typeof options.origin === "string" && options.origin.trim()
+      ? options.origin.trim()
+      : "";
+  if (explicit) {
+    return normalizeMcpResourceUrl(explicit);
+  }
+  return new URL(resourceUrl).origin;
+}
+
+async function readMcpProbeBody(response: Response): Promise<unknown> {
+  const text = await response.text().catch(() => "");
+  if (!text) {
+    return null;
+  }
+  const trimmed = text.trim();
+  const contentType = response.headers.get("content-type") ?? "";
+  if (
+    contentType.toLowerCase().includes("application/json") ||
+    trimmed.startsWith("{") ||
+    trimmed.startsWith("[")
+  ) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return text;
+    }
+  }
+  return text;
+}
+
+async function fetchMcpProbe(
+  url: string,
+  init: RequestInit = {},
+): Promise<McpProbeHttpResult> {
+  const response = await fetch(url, init);
+  return {
+    url,
+    status: response.status,
+    ok: response.ok,
+    headers: {
+      contentType: response.headers.get("content-type"),
+      location: response.headers.get("location"),
+      wwwAuthenticate: response.headers.get("www-authenticate"),
+    },
+    body: await readMcpProbeBody(response),
+  };
+}
+
+function buildMcpJsonRpcRequest(
+  id: number,
+  method: string,
+  params?: Record<string, unknown>,
+): Record<string, unknown> {
+  return params
+    ? { jsonrpc: "2.0", id, method, params }
+    : { jsonrpc: "2.0", id, method };
+}
+
+function parseMcpToolArguments(
+  options: Record<string, string | boolean>,
+): Record<string, unknown> {
+  const raw =
+    typeof options.arguments === "string" && options.arguments.trim()
+      ? options.arguments
+      : typeof options.args === "string" && options.args.trim()
+        ? options.args
+        : "";
+  if (!raw) {
+    return {};
+  }
+  const parsed = parseJsonOption(raw, "arguments");
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("arguments must be a JSON object");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+async function postMcpJsonRpcProbe(input: {
+  resourceUrl: string;
+  id: number;
+  method: string;
+  params?: Record<string, unknown>;
+  accessToken?: string;
+}): Promise<McpProbeHttpResult> {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+  if (input.accessToken) {
+    headers.authorization = `Bearer ${input.accessToken}`;
+  }
+  return fetchMcpProbe(input.resourceUrl, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(buildMcpJsonRpcRequest(input.id, input.method, input.params)),
+  });
+}
+
+async function probeOrganizationMcp(input: {
+  resourceUrl: string;
+  origin: string;
+  toolName: string;
+  toolArguments: Record<string, unknown>;
+  accessToken?: string;
+}): Promise<Record<string, unknown>> {
+  const resourceUrl = normalizeMcpResourceUrl(input.resourceUrl);
+  const origin = normalizeMcpResourceUrl(input.origin);
+  const protectedResourceUrl = `${resourceUrl}/.well-known/oauth-protected-resource`;
+  const authorizationServerUrl = `${origin}/.well-known/oauth-authorization-server`;
+  const [
+    protectedResource,
+    authorizationServer,
+    directGetChallenge,
+    initialize,
+    toolsList,
+    unauthenticatedToolCall,
+    authenticatedToolCall,
+  ] = await Promise.all([
+    fetchMcpProbe(protectedResourceUrl),
+    fetchMcpProbe(authorizationServerUrl),
+    fetchMcpProbe(resourceUrl),
+    postMcpJsonRpcProbe({
+      resourceUrl,
+      id: 1,
+      method: "initialize",
+    }),
+    postMcpJsonRpcProbe({
+      resourceUrl,
+      id: 2,
+      method: "tools/list",
+    }),
+    postMcpJsonRpcProbe({
+      resourceUrl,
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: input.toolName,
+        arguments: input.toolArguments,
+      },
+    }),
+    input.accessToken
+      ? postMcpJsonRpcProbe({
+          resourceUrl,
+          id: 4,
+          method: "tools/call",
+          params: {
+            name: input.toolName,
+            arguments: input.toolArguments,
+          },
+          accessToken: input.accessToken,
+        })
+      : Promise.resolve(null),
+  ]);
+
+  return {
+    resourceUrl,
+    origin,
+    protectedResource,
+    authorizationServer,
+    directGetChallenge,
+    initialize,
+    toolsList,
+    unauthenticatedToolCall,
+    ...(authenticatedToolCall ? { authenticatedToolCall } : {}),
+  };
+}
+
 function formatTemplateBuildLine(build: SandboxTemplateBuildRecord): string {
   return [
     build.id,
@@ -2635,6 +2847,38 @@ async function runOrganizationsCommand(
     return;
   }
 
+  if (subcommand === "mcp-probe" || subcommand === "mcp-inspect") {
+    const slug = rest[1];
+    if (!slug) {
+      throw new Error(
+        "usage: organizations mcp-probe <slug> [--origin <url>] [--tool <name>] [--arguments <json>] [--access-token <token>]",
+      );
+    }
+    const mcpServer = await client.getOrganizationMcpServer(slug);
+    const resourceUrl = resolveMcpProbeResourceUrl(mcpServer, options);
+    const origin = resolveMcpProbeOrigin(resourceUrl, options);
+    const toolName =
+      typeof options.tool === "string" && options.tool.trim()
+        ? options.tool.trim()
+        : typeof options.toolName === "string" && options.toolName.trim()
+          ? options.toolName.trim()
+          : "estimate_search_history";
+    const toolArguments = parseMcpToolArguments(options);
+    const accessToken =
+      typeof options.accessToken === "string" && options.accessToken.trim()
+        ? options.accessToken.trim()
+        : "";
+    const probe = await probeOrganizationMcp({
+      resourceUrl,
+      origin,
+      toolName,
+      toolArguments,
+      ...(accessToken ? { accessToken } : {}),
+    });
+    console.log(JSON.stringify({ mcpServer, probe }, null, 2));
+    return;
+  }
+
   if (
     subcommand === "mcp-rotate" ||
     subcommand === "mcp-disable" ||
@@ -2655,7 +2899,7 @@ async function runOrganizationsCommand(
   }
 
   throw new Error(
-    "usage: organizations <list|create|get|update|members|member-upsert|mcp-get|mcp-generate|mcp-rotate|mcp-disable|mcp-enable> [args]",
+    "usage: organizations <list|create|get|update|members|member-upsert|mcp-get|mcp-generate|mcp-probe|mcp-rotate|mcp-disable|mcp-enable> [args]",
   );
 }
 
