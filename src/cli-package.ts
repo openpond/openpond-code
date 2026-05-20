@@ -80,6 +80,7 @@ import {
   type SandboxTemplateBuildRecord,
 } from "./sandbox";
 import {
+  OPENPOND_MANIFEST_FILE_NAME,
   formatSandboxTemplateDiagnostics,
   sandboxTemplateBuildMetadata,
   sandboxTemplateExecutableEntries,
@@ -787,9 +788,9 @@ async function runSandboxTemplateCommand(
         ? options.description.trim()
         : undefined;
     const files = sandboxTemplateScaffoldFiles({ name: rawName, description });
-    const manifestPath = path.join(outputPath, "sandbox-template.yaml");
+    const manifestPath = path.join(outputPath, OPENPOND_MANIFEST_FILE_NAME);
     if (existsSync(manifestPath)) {
-      throw new Error(`sandbox-template.yaml already exists at ${manifestPath}`);
+      throw new Error(`${OPENPOND_MANIFEST_FILE_NAME} already exists at ${manifestPath}`);
     }
     await fs.mkdir(outputPath, { recursive: true });
     for (const [relativePath, contents] of Object.entries(files)) {
@@ -838,7 +839,7 @@ async function runSandboxTemplateCommand(
   }
 
   throw new Error(
-    "usage: sandbox-template <validate|print-schema|scaffold|build> [--file sandbox-template.yaml] [--path <dir>] [--name <name>]",
+    `usage: sandbox-template <validate|print-schema|scaffold|build> [--file ${OPENPOND_MANIFEST_FILE_NAME}] [--path <dir>] [--name <name>]`,
   );
 }
 
@@ -848,7 +849,7 @@ function resolveSandboxTemplateFilePath(options: Record<string, string | boolean
       ? options.file.trim()
       : typeof options.manifest === "string" && options.manifest.trim().length > 0
         ? options.manifest.trim()
-        : "sandbox-template.yaml";
+        : OPENPOND_MANIFEST_FILE_NAME;
   return path.resolve(process.cwd(), rawFile);
 }
 
@@ -889,10 +890,10 @@ function printHelp(): void {
   console.log("  openpond template status <handle>/<repo>");
   console.log("  openpond template branches <handle>/<repo>");
   console.log("  openpond template update <handle>/<repo> [--env preview|production]");
-  console.log("  openpond sandbox-template validate [--file sandbox-template.yaml]");
+  console.log(`  openpond sandbox-template validate [--file ${OPENPOND_MANIFEST_FILE_NAME}]`);
   console.log("  openpond sandbox-template print-schema");
   console.log("  openpond sandbox-template scaffold [--path <dir>] [--name <name>]");
-  console.log("  openpond sandbox-template build [--file sandbox-template.yaml]");
+  console.log(`  openpond sandbox-template build [--file ${OPENPOND_MANIFEST_FILE_NAME}]`);
   console.log(
     "  openpond repo create --name <name> [--team-id <id>] [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--env <json>] [--empty|--opentool] [--token] [--auto-schedule-migration <true|false>]",
   );

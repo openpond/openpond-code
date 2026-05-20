@@ -3,6 +3,7 @@ import { z } from "zod";
 
 export const SANDBOX_TEMPLATE_PREVIEW_PORT_MIN = 3000;
 export const SANDBOX_TEMPLATE_PREVIEW_PORT_MAX = 9999;
+export const OPENPOND_MANIFEST_FILE_NAME = "openpond.yaml";
 
 const INTEGRATION_PROVIDERS = [
   "google",
@@ -280,7 +281,7 @@ export function validateSandboxTemplateManifest(value: unknown): SandboxTemplate
         {
           path: "$",
           code: "invalid_type",
-          message: "sandbox-template.yaml must be an object",
+          message: `${OPENPOND_MANIFEST_FILE_NAME} must be an object`,
         },
       ],
     };
@@ -406,7 +407,7 @@ export function sandboxTemplateScaffoldFiles(
       "",
       "- `bun run dev` starts the preview service on port 3000.",
       "- `bun run process` writes a sample artifact.",
-      "- `bun run validate` validates sandbox-template.yaml.",
+      `- \`bun run validate\` validates ${OPENPOND_MANIFEST_FILE_NAME}.`,
       "",
     ].join("\n"),
     "package.json": `${JSON.stringify(
@@ -414,15 +415,15 @@ export function sandboxTemplateScaffoldFiles(
         private: true,
         type: "module",
         scripts: {
-          dev: "bun src/server.mjs",
-          process: "bun scripts/process.mjs",
-          validate: "openpond sandbox-template validate --file sandbox-template.yaml",
+          dev: "bun src/server.ts",
+          process: "bun scripts/process.ts",
+          validate: `openpond sandbox-template validate --file ${OPENPOND_MANIFEST_FILE_NAME}`,
         },
       },
       null,
       2,
     )}\n`,
-    "sandbox-template.yaml": [
+    [OPENPOND_MANIFEST_FILE_NAME]: [
       "schemaVersion: 1",
       `name: ${name}`,
       "version: 0.1.0",
@@ -439,10 +440,10 @@ export function sandboxTemplateScaffoldFiles(
       "    - mkdir -p artifacts",
       "validation:",
       "  commands:",
-      "    - test -f src/server.mjs",
-      "    - test -f scripts/process.mjs",
+      "    - test -f src/server.ts",
+      "    - test -f scripts/process.ts",
       "start:",
-      "  command: bun scripts/process.mjs",
+      "  command: bun run process",
       "  timeoutSeconds: 300",
       "  ports: []",
       "  artifactPaths:",
@@ -450,7 +451,7 @@ export function sandboxTemplateScaffoldFiles(
       "actions: []",
       "services:",
       "  - name: web",
-      "    command: bun src/server.mjs",
+      "    command: bun run dev",
       "    timeoutSeconds: 3600",
       "    ports:",
       "      - port: 3000",
@@ -474,7 +475,7 @@ export function sandboxTemplateScaffoldFiles(
       "  egress: restricted",
       "",
     ].join("\n"),
-    "src/server.mjs": [
+    "src/server.ts": [
       "Bun.serve({",
       "  host: '0.0.0.0',",
       "  port: 3000,",
@@ -484,7 +485,7 @@ export function sandboxTemplateScaffoldFiles(
       "});",
       "",
     ].join("\n"),
-    "scripts/process.mjs": [
+    "scripts/process.ts": [
       "import { mkdir, writeFile } from 'node:fs/promises';",
       "",
       "const raw = process.env.OPENPOND_REPLAY_PARAMS_BASE64;",
