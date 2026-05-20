@@ -55,18 +55,6 @@ const SandboxTemplateRequiredLeaseSchema = z
   })
   .strict();
 
-const SandboxTemplateDatabaseSchema = z
-  .object({
-    engine: z.literal("postgres"),
-    version: z.string().trim().min(1).max(40).optional(),
-    name: z.string().trim().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).max(63).optional(),
-    plan: z.literal("dev").optional(),
-    storageGb: z.number().int().positive().max(100).optional(),
-    extensions: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
-    publicAccess: z.boolean().optional(),
-  })
-  .strict();
-
 const SandboxTemplateVolumeSchema = z
   .object({
     name: z.string().trim().regex(/^[A-Za-z_][A-Za-z0-9_-]*$/).max(63).optional(),
@@ -172,7 +160,6 @@ export const SandboxTemplateManifestSchema = z
     start: SandboxTemplateCommandSchema,
     actions: z.array(SandboxTemplateNamedCommandSchema).max(20).default([]),
     services: z.array(SandboxTemplateNamedCommandSchema).max(20).default([]),
-    databases: z.array(SandboxTemplateDatabaseSchema).max(5).default([]),
     volumes: z.array(SandboxTemplateVolumeSchema).max(5).default([]),
     integrations: z
       .object({
@@ -202,12 +189,6 @@ export const SandboxTemplateManifestSchema = z
   .strict()
   .superRefine((manifest, context) => {
     validateExecutableNames(manifest, context);
-    addDuplicateNameIssue(
-      context,
-      manifest.databases.flatMap((database) => (database.name ? [database.name] : [])),
-      "database names must be unique",
-      "databases",
-    );
     addDuplicateNameIssue(
       context,
       manifest.volumes.flatMap((volume) => (volume.name ? [volume.name] : [])),
@@ -286,6 +267,20 @@ export function validateSandboxTemplateManifest(value: unknown): SandboxTemplate
       ],
     };
   }
+  if (Object.prototype.hasOwnProperty.call(value, "databases")) {
+    return {
+      ok: false,
+      manifest: null,
+      diagnostics: [
+        {
+          path: "$.databases",
+          code: "database_resources_removed",
+          message:
+            "managed database requests are unsupported for Firecracker sandbox templates; use a durable volume with SQLite or files instead",
+        },
+      ],
+    };
+  }
   const result = SandboxTemplateManifestSchema.safeParse(value);
   if (result.success) return { ok: true, manifest: result.data, diagnostics: [] };
   return {
@@ -358,7 +353,6 @@ export function sandboxTemplateBuildMetadata(manifest: SandboxTemplateManifest):
       runtime: manifest.runtime,
     },
     resources: manifest.resources ?? null,
-    databases: manifest.databases,
     volumes: manifest.volumes,
     executables: executables.map((entry) => ({
       kind: entry.kind,

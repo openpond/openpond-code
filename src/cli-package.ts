@@ -87,6 +87,9 @@ import {
   sandboxTemplateJsonSchema,
   sandboxTemplateScaffoldFiles,
   validateSandboxTemplateYaml,
+  type SandboxTemplateExecutable,
+  type SandboxTemplateManifest,
+  type SandboxTemplatePort,
 } from "./sandbox-template";
 
 const DEFAULT_OPENPOND_API_HOST = new URL(DEFAULT_OPENPOND_API_BASE_URL).hostname;
@@ -838,9 +841,824 @@ async function runSandboxTemplateCommand(
     return;
   }
 
+  if (subcommand === "start") {
+    await runSandboxTemplateStart(options);
+    return;
+  }
+
   throw new Error(
-    `usage: sandbox-template <validate|print-schema|scaffold|build> [--file ${OPENPOND_MANIFEST_FILE_NAME}] [--path <dir>] [--name <name>]`,
+    `usage: sandbox-template <validate|print-schema|scaffold|build|start> [--file ${OPENPOND_MANIFEST_FILE_NAME}] [--path <dir>] [--name <name>]`,
   );
+}
+
+type SandboxTemplateScalarInputs = Record<string, unknown>;
+
+type SandboxTemplateUploadSpec = {
+  inputName: string;
+  multiple: boolean;
+  targetPath: string;
+};
+
+type SandboxTemplateUploadRequest = {
+  inputName: string;
+  localPaths: string[];
+  spec: SandboxTemplateUploadSpec;
+};
+
+type SandboxTemplateUploadedFile = {
+  inputName: string;
+  localPath: string;
+  sandboxPath: string;
+  sizeBytes: number;
+};
+
+async function runSandboxTemplateStart(options: Record<string, string | boolean>): Promise<void> {
+  const filePath = resolveSandboxTemplateFilePath(options);
+  const projectPath = path.dirname(filePath);
+  const source = await fs.readFile(filePath, "utf8");
+  const result = validateSandboxTemplateYaml(source);
+  if (!result.ok) {
+    console.error(formatSandboxTemplateDiagnostics(result.diagnostics));
+    process.exitCode = 1;
+    return;
+  }
+
+  const manifest = result.manifest;
+  const executable = resolveSandboxTemplateStartExecutable(manifest, options);
+  const input = await resolveSandboxTemplateStartInput(manifest, options, projectPath);
+  const repo = await resolveSandboxTemplateStartRepo(manifest, options, projectPath);
+  const client = await resolveSandboxClient(options);
+  const createInput = buildSandboxTemplateStartCreateInput(manifest, options, repo);
+  const sandbox = await createSandboxTemplateStartSandbox(client, createInput, repo);
+  await waitForSandboxTemplateRunnerReady(client, sandbox.id);
+  const setupCommands = await runSandboxTemplateSetupCommands(client, sandbox.id, manifest, options);
+  const uploadedFiles = await uploadSandboxTemplateStartFiles(
+    client,
+    sandbox.id,
+    input.uploadRequests,
+  );
+  const commandInput = {
+    ...input.scalars,
+    ...formatUploadedFileParams(uploadedFiles, input.uploadRequests),
+  };
+  const execution = await runSandboxTemplateExecutable(client, sandbox.id, executable, commandInput);
+  const previews = await openSandboxTemplatePorts(client, sandbox.id, executable.ports);
+
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        file: filePath,
+        repo,
+        executable: {
+          kind: executable.kind,
+          name: executable.name,
+          command: executable.command,
+        },
+        sandbox: summarizeSandbox(sandbox),
+        setupCommands,
+        uploadedFiles,
+        input: commandInput,
+        execution,
+        previews,
+        expectedArtifacts: executable.artifactPaths,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+function resolveSandboxTemplateStartExecutable(
+  manifest: SandboxTemplateManifest,
+  options: Record<string, string | boolean>,
+): SandboxTemplateExecutable {
+  const executables = sandboxTemplateExecutableEntries(manifest);
+  const action = typeof options.action === "string" ? options.action.trim() : "";
+  const service = typeof options.service === "string" ? options.service.trim() : "";
+  const entrypoint =
+    typeof options.entrypoint === "string" ? options.entrypoint.trim() : "";
+  const requested = action || service || entrypoint || "start";
+  const kind = action ? "action" : service ? "service" : "";
+  const match = executables.find(
+    (candidate) =>
+      candidate.name === requested && (!kind || candidate.kind === kind),
+  );
+  if (!match) {
+    throw new Error(
+      `manifest executable not found: ${requested}. Available: ${executables
+        .map((candidate) => `${candidate.kind}:${candidate.name}`)
+        .join(", ")}`,
+    );
+  }
+  return match;
+}
+
+function buildSandboxTemplateStartCreateInput(
+  manifest: SandboxTemplateManifest,
+  options: Record<string, string | boolean>,
+  repo: string,
+): SandboxCreateInput {
+  const budgetUsd =
+    typeof options.budgetUsd === "string" && options.budgetUsd.trim()
+      ? options.budgetUsd.trim()
+      : typeof options.budget === "string" && options.budget.trim()
+        ? options.budget.trim()
+        : "0.05";
+  const maxDurationSeconds = parseIntegerOption(options.maxDurationSeconds, "max-duration-seconds");
+  const idleTimeoutSeconds = parseIntegerOption(options.idleTimeoutSeconds, "idle-timeout-seconds");
+  const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+  const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+  return {
+    repo,
+    ...(teamId ? { teamId } : {}),
+    ...(appId ? { appId } : {}),
+    resources: manifest.resources ?? {},
+    budget: { maxUsd: budgetUsd },
+    quotas: {
+      maxSpendUsd: budgetUsd,
+      ...(maxDurationSeconds !== undefined ? { maxDurationSeconds } : {}),
+      ...(idleTimeoutSeconds !== undefined ? { idleTimeoutSeconds } : {}),
+    },
+    volumes: manifest.volumes,
+    metadata: {
+      source: "openpond-code-sandbox-template-start",
+      manifestFile: OPENPOND_MANIFEST_FILE_NAME,
+      template: {
+        name: manifest.name,
+        version: manifest.version,
+        useCase: manifest.useCase,
+      },
+    },
+  };
+}
+
+async function createSandboxTemplateStartSandbox(
+  client: OpenPondSandboxClient,
+  input: SandboxCreateInput,
+  repo: string,
+): Promise<SandboxRecord> {
+  const requestedAt = Date.now();
+  try {
+    return await client.create(input);
+  } catch (error) {
+    if (!isLikelySandboxCreateTimeout(error)) {
+      throw error;
+    }
+    console.warn("warning: sandbox create timed out; checking for the created sandbox record");
+    return recoverTimedOutSandboxCreate(client, input, repo, requestedAt);
+  }
+}
+
+function isLikelySandboxCreateTimeout(error: unknown): boolean {
+  return error instanceof Error && /\b(504|timed out|timeout)\b/i.test(error.message);
+}
+
+async function recoverTimedOutSandboxCreate(
+  client: OpenPondSandboxClient,
+  input: SandboxCreateInput,
+  repo: string,
+  requestedAt: number,
+): Promise<SandboxRecord> {
+  const timeoutMs = 120_000;
+  const pollMs = 3_000;
+  const deadline = Date.now() + timeoutMs;
+  const repoIdentity = normalizeSandboxTemplateRepoIdentity(repo);
+  const metadata = input.metadata ?? {};
+  while (Date.now() < deadline) {
+    const sandboxes = await client.list({
+      ...(input.teamId ? { teamId: input.teamId } : {}),
+      ...(input.appId ? { appId: input.appId } : {}),
+    });
+    const match = sandboxes
+      .filter((sandbox) => {
+        if (!sandbox.repo) return false;
+        if (normalizeSandboxTemplateRepoIdentity(sandbox.repo) !== repoIdentity) return false;
+        const createdAt = Date.parse(sandbox.createdAt);
+        if (Number.isFinite(createdAt) && createdAt < requestedAt - 30_000) return false;
+        if (metadata.source && sandbox.metadata?.source !== metadata.source) return false;
+        return true;
+      })
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0];
+    if (match?.state === "running" || match?.state === "stopped") {
+      return match;
+    }
+    if (match?.state === "error") {
+      throw new Error(`sandbox create failed after timeout: ${match.id}\n${match.logs.join("\n")}`);
+    }
+    await sleep(pollMs);
+  }
+  throw new Error("sandbox create timed out and no matching created sandbox reached running state");
+}
+
+async function waitForSandboxTemplateRunnerReady(
+  client: OpenPondSandboxClient,
+  sandboxId: string,
+): Promise<void> {
+  const timeoutMs = 120_000;
+  const pollMs = 3_000;
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown = null;
+  while (Date.now() < deadline) {
+    try {
+      const result = await client.exec(sandboxId, {
+        command: "true",
+        timeoutSeconds: 30,
+      });
+      if (result.command.status === "succeeded" && result.command.exitCode === 0) {
+        return;
+      }
+      lastError = new Error(
+        `readiness command ${result.command.status} with exit code ${String(result.command.exitCode)}`,
+      );
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableSandboxRunnerReadyError(error)) {
+        throw error;
+      }
+    }
+    await sleep(pollMs);
+  }
+  throw new Error(
+    `sandbox runner was not ready after create: ${formatUnknownError(lastError)}`,
+  );
+}
+
+function isRetryableSandboxRunnerReadyError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /\b(502|503|504|timed out|timeout|sandbox_not_found|sandbox_not_ready|sandbox_runner_failed)\b/i.test(
+      error.message,
+    )
+  );
+}
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  return "unknown error";
+}
+
+function normalizeSandboxTemplateRepoIdentity(repoUrl: string): string {
+  return normalizeSandboxTemplateRepoUrl(repoUrl).replace(/\.git$/, "");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function resolveSandboxTemplateStartRepo(
+  manifest: SandboxTemplateManifest,
+  options: Record<string, string | boolean>,
+  projectPath: string,
+): Promise<string> {
+  const explicitRepo = typeof options.repo === "string" ? options.repo.trim() : "";
+  if (explicitRepo) {
+    return normalizeSandboxTemplateRepoUrl(explicitRepo);
+  }
+
+  await ensureGitRepository(projectPath);
+  const config = await loadConfig();
+  const uiBase = resolveBaseUrl(config);
+  const apiBase = resolvePublicApiBaseUrl(config);
+  const apiKey = await ensureApiKey(config, uiBase);
+  let originUrl = await getGitRemoteUrl(projectPath, "origin");
+  if (!originUrl) {
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const response = await createRepo(apiBase, apiKey, {
+      name: manifest.name,
+      description: manifest.description,
+      repoInit: "empty",
+      ...(teamId ? { teamId } : {}),
+    });
+    originUrl = resolveRepoUrl(response);
+    const remoteResult = await runCommand("git", ["remote", "add", "origin", originUrl], {
+      cwd: projectPath,
+    });
+    if (remoteResult.code !== 0) {
+      throw new Error(
+        `git remote add failed: ${
+          remoteResult.stderr.trim() || remoteResult.stdout.trim() || "unknown error"
+        }`,
+      );
+    }
+  }
+
+  warnOnRepoHostMismatch(originUrl);
+  await ensureGitCommitForSandboxTemplateStart(projectPath, options);
+  if (!parseBooleanOption(options.noPush)) {
+    const branch = await resolveSandboxTemplateStartBranch(projectPath, options);
+    await pushGitBranchForSandboxTemplateStart(projectPath, originUrl, branch, apiKey, options);
+  }
+  return normalizeSandboxTemplateRepoUrl(originUrl);
+}
+
+async function ensureGitRepository(projectPath: string): Promise<void> {
+  const gitDir = path.join(projectPath, ".git");
+  if (existsSync(gitDir)) return;
+  const result = await runCommand("git", ["init"], { cwd: projectPath });
+  if (result.code !== 0) {
+    throw new Error(
+      `git init failed: ${result.stderr.trim() || result.stdout.trim() || "unknown error"}`,
+    );
+  }
+}
+
+async function ensureGitCommitForSandboxTemplateStart(
+  projectPath: string,
+  options: Record<string, string | boolean>,
+): Promise<void> {
+  const status = await runCommand("git", ["status", "--porcelain"], { cwd: projectPath });
+  if (status.code !== 0) {
+    throw new Error(
+      `git status failed: ${status.stderr.trim() || status.stdout.trim() || "unknown error"}`,
+    );
+  }
+  const head = await runCommand("git", ["rev-parse", "--verify", "HEAD"], { cwd: projectPath });
+  const hasHead = head.code === 0;
+  const dirty = status.stdout.trim().length > 0;
+  if (!dirty && hasHead) return;
+
+  const shouldCommit =
+    parseBooleanOption(options.commit) ||
+    parseBooleanOption(options.yes) ||
+    (input.isTTY
+      ? await promptConfirm(
+          hasHead
+            ? "Commit local changes before starting the sandbox?"
+            : "Create the initial git commit before starting the sandbox?",
+          !hasHead,
+        )
+      : false);
+
+  if (!shouldCommit) {
+    if (!hasHead) {
+      throw new Error("local repository has no commits; pass --commit or commit before starting");
+    }
+    if (dirty) {
+      console.warn("warning: uncommitted local changes will not be included in the sandbox");
+    }
+    return;
+  }
+
+  const add = await runCommand("git", ["add", "-A"], { cwd: projectPath });
+  if (add.code !== 0) {
+    throw new Error(`git add failed: ${add.stderr.trim() || add.stdout.trim() || "unknown error"}`);
+  }
+  const message =
+    typeof options.commitMessage === "string" && options.commitMessage.trim()
+      ? options.commitMessage.trim()
+      : `start ${OPENPOND_MANIFEST_FILE_NAME} sandbox`;
+  const commit = await runCommand("git", ["commit", "-m", message], { cwd: projectPath });
+  if (commit.code !== 0) {
+    const output = commit.stderr.trim() || commit.stdout.trim();
+    if (output.includes("nothing to commit") && hasHead) return;
+    throw new Error(`git commit failed: ${output || "unknown error"}`);
+  }
+}
+
+async function resolveSandboxTemplateStartBranch(
+  projectPath: string,
+  options: Record<string, string | boolean>,
+): Promise<string> {
+  const branchOption = typeof options.branch === "string" ? options.branch.trim() : "";
+  const branch = branchOption || (await resolveGitBranch(projectPath));
+  if (!branch) {
+    throw new Error("unable to resolve git branch; pass --branch");
+  }
+  return branch;
+}
+
+async function pushGitBranchForSandboxTemplateStart(
+  projectPath: string,
+  originUrl: string,
+  branch: string,
+  apiKey: string,
+  options: Record<string, string | boolean>,
+): Promise<void> {
+  let tokenRemote: string;
+  try {
+    tokenRemote = formatTokenizedRepoUrl(originUrl, apiKey);
+  } catch {
+    throw new Error("origin remote must be https for tokenized pushes");
+  }
+  const keepTokenRemote =
+    parseBooleanOption(options.keepTokenRemote) ||
+    parseBooleanOption(options.token) ||
+    parseBooleanOption(options.setRemoteToken);
+  const alreadyTokenized = originUrl.includes("x-access-token:");
+  const restoreUrl = !keepTokenRemote && !alreadyTokenized ? originUrl : null;
+  const previousPrompt = process.env.GIT_TERMINAL_PROMPT;
+  process.env.GIT_TERMINAL_PROMPT = "0";
+  try {
+    if (!alreadyTokenized) {
+      const setResult = await runCommand("git", ["remote", "set-url", "origin", tokenRemote], {
+        cwd: projectPath,
+      });
+      if (setResult.code !== 0) {
+        throw new Error(
+          `git remote set-url failed: ${redactToken(
+            setResult.stderr.trim() || setResult.stdout.trim() || "unknown error",
+          )}`,
+        );
+      }
+    }
+    const push = await runCommand("git", ["push", "-u", "origin", branch], {
+      cwd: projectPath,
+      inherit: true,
+    });
+    if (push.code !== 0) {
+      throw new Error("git push failed");
+    }
+  } finally {
+    if (restoreUrl) {
+      await runCommand("git", ["remote", "set-url", "origin", restoreUrl], {
+        cwd: projectPath,
+      }).catch(() => null);
+    }
+    if (previousPrompt === undefined) {
+      delete process.env.GIT_TERMINAL_PROMPT;
+    } else {
+      process.env.GIT_TERMINAL_PROMPT = previousPrompt;
+    }
+  }
+}
+
+function normalizeSandboxTemplateRepoUrl(repoUrl: string): string {
+  const parsed = new URL(repoUrl);
+  parsed.username = "";
+  parsed.password = "";
+  const text = parsed.toString();
+  return text.endsWith(".git") ? text : `${text.replace(/\/$/, "")}.git`;
+}
+
+async function resolveSandboxTemplateStartInput(
+  manifest: SandboxTemplateManifest,
+  options: Record<string, string | boolean>,
+  projectPath: string,
+): Promise<{
+  scalars: SandboxTemplateScalarInputs;
+  uploadRequests: SandboxTemplateUploadRequest[];
+}> {
+  const scalars = parseSandboxTemplateScalarInputs(options);
+  const uploadSpecs = collectSandboxTemplateUploadSpecs(manifest);
+  const uploadRequests: SandboxTemplateUploadRequest[] = [];
+  const fileInputs = parseSandboxTemplateFileInputOptions(options);
+  for (const [inputName, rawValue] of Object.entries(fileInputs)) {
+    const spec = uploadSpecs.get(inputName);
+    if (!spec) {
+      throw new Error(`${inputName} is not declared as a file upload input in ${OPENPOND_MANIFEST_FILE_NAME}`);
+    }
+    const localPaths = await expandSandboxTemplateUploadPaths(rawValue, projectPath);
+    if (!spec.multiple && localPaths.length > 1) {
+      throw new Error(`${inputName} accepts one file, got ${localPaths.length}`);
+    }
+    uploadRequests.push({ inputName, localPaths, spec });
+  }
+
+  const requiredInputs = Array.isArray(manifest.inputs.schema.required)
+    ? manifest.inputs.schema.required.filter((value): value is string => typeof value === "string")
+    : [];
+  for (const inputName of requiredInputs) {
+    if (uploadSpecs.has(inputName) && !uploadRequests.some((request) => request.inputName === inputName)) {
+      throw new Error(`${inputName} is required; pass --input-file ${inputName}=<path> or --input-files ${inputName}=<glob>`);
+    }
+  }
+
+  return { scalars, uploadRequests };
+}
+
+function parseSandboxTemplateScalarInputs(
+  options: Record<string, string | boolean>,
+): SandboxTemplateScalarInputs {
+  const rawInputs =
+    typeof options.inputs === "string"
+      ? options.inputs
+      : typeof options.inputJson === "string"
+        ? options.inputJson
+        : typeof options.params === "string"
+          ? options.params
+          : "";
+  const scalars = rawInputs
+    ? (parseJsonOption(rawInputs, "inputs") as SandboxTemplateScalarInputs)
+    : {};
+  if (!scalars || typeof scalars !== "object" || Array.isArray(scalars)) {
+    throw new Error("inputs must be a JSON object");
+  }
+  const rawInput = typeof options.input === "string" ? options.input.trim() : "";
+  if (rawInput) {
+    const [name, value] = parseKeyValueOption(rawInput, "input");
+    scalars[name] = value;
+  }
+  return scalars;
+}
+
+function parseSandboxTemplateFileInputOptions(
+  options: Record<string, string | boolean>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const rawFile = typeof options.inputFile === "string" ? options.inputFile.trim() : "";
+  if (rawFile) {
+    const [name, value] = parseKeyValueOption(rawFile, "input-file");
+    out[name] = value;
+  }
+  const rawFiles = typeof options.inputFiles === "string" ? options.inputFiles.trim() : "";
+  if (rawFiles) {
+    const [name, value] = parseKeyValueOption(rawFiles, "input-files");
+    out[name] = value;
+  }
+  return out;
+}
+
+function parseKeyValueOption(value: string, label: string): [string, string] {
+  const index = value.indexOf("=");
+  if (index <= 0) {
+    throw new Error(`${label} must be formatted as name=value`);
+  }
+  const key = value.slice(0, index).trim();
+  const raw = value.slice(index + 1).trim();
+  if (!key || !raw) {
+    throw new Error(`${label} must be formatted as name=value`);
+  }
+  return [key, raw];
+}
+
+function collectSandboxTemplateUploadSpecs(
+  manifest: SandboxTemplateManifest,
+): Map<string, SandboxTemplateUploadSpec> {
+  const properties = asPlainRecord(manifest.inputs.schema.properties);
+  const specs = new Map<string, SandboxTemplateUploadSpec>();
+  for (const [inputName, rawProperty] of Object.entries(properties)) {
+    const property = asPlainRecord(rawProperty);
+    const upload = asPlainRecord(
+      property["x-openpond-upload"] ?? property.xOpenPondUpload,
+    );
+    if (!upload) continue;
+    const targetPath =
+      typeof upload.targetPath === "string" && upload.targetPath.trim()
+        ? normalizeSandboxUploadTargetPath(upload.targetPath)
+        : "";
+    if (!targetPath) {
+      throw new Error(`${inputName} upload metadata is missing targetPath`);
+    }
+    const multiple =
+      upload.multiple === true ||
+      property.type === "array" ||
+      asPlainRecord(property.items)?.format === "file";
+    specs.set(inputName, { inputName, multiple, targetPath });
+  }
+  return specs;
+}
+
+function asPlainRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function normalizeSandboxUploadTargetPath(value: string): string {
+  const normalized = value
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\/workspace\//, "")
+    .replace(/^\.\//, "")
+    .replace(/^\/+/, "");
+  if (!normalized || normalized.split("/").some((segment) => segment === ".." || segment === "")) {
+    throw new Error(`invalid upload target path: ${value}`);
+  }
+  return normalized;
+}
+
+async function expandSandboxTemplateUploadPaths(
+  rawValue: string,
+  projectPath: string,
+): Promise<string[]> {
+  const values = rawValue
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const paths = (
+    await Promise.all(values.map((value) => expandSandboxTemplateUploadPath(value, projectPath)))
+  ).flat();
+  if (paths.length === 0) {
+    throw new Error(`no files matched ${rawValue}`);
+  }
+  return paths;
+}
+
+async function expandSandboxTemplateUploadPath(
+  rawValue: string,
+  projectPath: string,
+): Promise<string[]> {
+  const absolute = path.resolve(projectPath, rawValue);
+  if (!rawValue.includes("*")) {
+    const stats = await fs.stat(absolute);
+    if (!stats.isFile()) {
+      throw new Error(`upload path is not a file: ${absolute}`);
+    }
+    return [absolute];
+  }
+  const directory = path.dirname(absolute);
+  const basename = path.basename(absolute);
+  const regex = globBasenameToRegExp(basename);
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  const matches = entries
+    .filter((entry) => entry.isFile() && regex.test(entry.name))
+    .map((entry) => path.join(directory, entry.name))
+    .sort((left, right) => left.localeCompare(right));
+  return matches;
+}
+
+function globBasenameToRegExp(pattern: string): RegExp {
+  const escaped = pattern
+    .split("*")
+    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+    .join(".*");
+  return new RegExp(`^${escaped}$`);
+}
+
+async function runSandboxTemplateSetupCommands(
+  client: OpenPondSandboxClient,
+  sandboxId: string,
+  manifest: SandboxTemplateManifest,
+  options: Record<string, string | boolean>,
+): Promise<Array<{ command: string; status: string; exitCode: number | null }>> {
+  const timeoutSeconds =
+    parseIntegerOption(options.setupTimeoutSeconds, "setup-timeout-seconds") ?? 900;
+  const results: Array<{ command: string; status: string; exitCode: number | null }> = [];
+  for (const command of manifest.setup.commands) {
+    const result = await runSandboxTemplateShellCommand(
+      client,
+      sandboxId,
+      command,
+      timeoutSeconds,
+    );
+    results.push({
+      command,
+      status: result.status,
+      exitCode: result.exitCode,
+    });
+    if (result.status !== "succeeded" || result.exitCode !== 0) {
+      throw new Error(`setup command failed: ${command}\n${result.output}`);
+    }
+  }
+  return results;
+}
+
+async function uploadSandboxTemplateStartFiles(
+  client: OpenPondSandboxClient,
+  sandboxId: string,
+  requests: SandboxTemplateUploadRequest[],
+): Promise<SandboxTemplateUploadedFile[]> {
+  const uploaded: SandboxTemplateUploadedFile[] = [];
+  for (const request of requests) {
+    for (const localPath of request.localPaths) {
+      const contents = await fs.readFile(localPath);
+      const sandboxPath = joinSandboxUploadPath(
+        request.spec.targetPath,
+        path.basename(localPath),
+      );
+      await client.uploadFileBase64(sandboxId, sandboxPath, contents.toString("base64"));
+      uploaded.push({
+        inputName: request.inputName,
+        localPath,
+        sandboxPath,
+        sizeBytes: contents.byteLength,
+      });
+    }
+  }
+  return uploaded;
+}
+
+function joinSandboxUploadPath(targetPath: string, basename: string): string {
+  return `${targetPath.replace(/\/+$/, "")}/${basename.replace(/^\/+/, "")}`;
+}
+
+function formatUploadedFileParams(
+  uploadedFiles: SandboxTemplateUploadedFile[],
+  requests: SandboxTemplateUploadRequest[],
+): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
+  for (const request of requests) {
+    const files = uploadedFiles
+      .filter((file) => file.inputName === request.inputName)
+      .map((file) => file.sandboxPath);
+    out[request.inputName] = request.spec.multiple ? files : files[0] ?? "";
+  }
+  return out;
+}
+
+async function runSandboxTemplateExecutable(
+  client: OpenPondSandboxClient,
+  sandboxId: string,
+  executable: SandboxTemplateExecutable,
+  input: SandboxTemplateScalarInputs,
+): Promise<Record<string, unknown>> {
+  await uploadSandboxTemplateReplayParams(client, sandboxId, input);
+  const command = formatSandboxTemplateCommand(executable);
+  const timeoutSeconds = executable.timeoutSeconds;
+  if (executable.kind === "service") {
+    const result = await client.startProcess(sandboxId, {
+      command,
+      ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
+    });
+    return { kind: "service", process: result.process };
+  }
+  const result = await runSandboxTemplateProcessToCompletion(
+    client,
+    sandboxId,
+    command,
+    timeoutSeconds ?? 900,
+  );
+  if (result.status !== "succeeded" || result.exitCode !== 0) {
+    throw new Error(`template command failed: ${executable.name}\n${result.output}`);
+  }
+  return { kind: executable.kind, process: result };
+}
+
+async function runSandboxTemplateShellCommand(
+  client: OpenPondSandboxClient,
+  sandboxId: string,
+  command: string,
+  timeoutSeconds?: number,
+): Promise<{
+  command: string;
+  status: string;
+  output: string;
+  exitCode: number | null;
+}> {
+  return runSandboxTemplateProcessToCompletion(client, sandboxId, command, timeoutSeconds ?? 900);
+}
+
+async function uploadSandboxTemplateReplayParams(
+  client: OpenPondSandboxClient,
+  sandboxId: string,
+  input: SandboxTemplateScalarInputs,
+): Promise<void> {
+  const paramsJson = `${JSON.stringify({ input }, null, 2)}\n`;
+  await client.uploadFileBase64(
+    sandboxId,
+    "openpond-replay-params.json",
+    Buffer.from(paramsJson, "utf8").toString("base64"),
+  );
+}
+
+async function runSandboxTemplateProcessToCompletion(
+  client: OpenPondSandboxClient,
+  sandboxId: string,
+  command: string,
+  timeoutSeconds: number,
+): Promise<{
+  command: string;
+  status: string;
+  output: string;
+  exitCode: number | null;
+  processId: string;
+}> {
+  const started = await client.startProcess(sandboxId, { command, timeoutSeconds });
+  let current = started.process;
+  const deadline = Date.now() + timeoutSeconds * 1000 + 30_000;
+  while (current.status === "running" && Date.now() < deadline) {
+    await sleep(3_000);
+    const polled = await client.getProcess(sandboxId, current.id);
+    current = polled.process;
+  }
+  return {
+    command: current.command,
+    status: current.status,
+    output: current.output,
+    exitCode: current.exitCode,
+    processId: current.id,
+  };
+}
+
+function formatSandboxTemplateCommand(executable: SandboxTemplateExecutable): string {
+  const paramsPath = quoteShellArg("openpond-replay-params.json");
+  const envPrefix = `OPENPOND_REPLAY_PARAMS_BASE64="$(base64 -w0 ${paramsPath} 2>/dev/null || base64 ${paramsPath} | tr -d '\\n')"`;
+  const command = `${envPrefix} ${executable.command}`;
+  if (!executable.cwd) return command;
+  return `cd ${quoteShellArg(executable.cwd)} && ${command}`;
+}
+
+function quoteShellArg(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+async function openSandboxTemplatePorts(
+  client: OpenPondSandboxClient,
+  sandboxId: string,
+  ports: SandboxTemplatePort[],
+): Promise<Array<Record<string, unknown>>> {
+  const previews: Array<Record<string, unknown>> = [];
+  for (const port of ports) {
+    const result = await client.openPort(sandboxId, {
+      port: port.port,
+      ...(port.label ? { label: port.label } : {}),
+      access: port.access,
+      autoStart: false,
+    });
+    previews.push(result.preview as unknown as Record<string, unknown>);
+  }
+  return previews;
 }
 
 function resolveSandboxTemplateFilePath(options: Record<string, string | boolean>): string {
@@ -894,6 +1712,9 @@ function printHelp(): void {
   console.log("  openpond sandbox-template print-schema");
   console.log("  openpond sandbox-template scaffold [--path <dir>] [--name <name>]");
   console.log(`  openpond sandbox-template build [--file ${OPENPOND_MANIFEST_FILE_NAME}]`);
+  console.log(
+    `  openpond sandbox-template start [--file ${OPENPOND_MANIFEST_FILE_NAME}] [--input-file name=path] [--input-files name=glob] [--action <name>|--service <name>] [--commit] [--no-push]`,
+  );
   console.log(
     "  openpond repo create --name <name> [--team-id <id>] [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--env <json>] [--empty|--opentool] [--token] [--auto-schedule-migration <true|false>]",
   );
@@ -2998,11 +3819,6 @@ function buildSandboxCreateInput(options: Record<string, string | boolean>): San
   const diskGb = parseNumberOption(options.diskGb, "disk-gb");
   const maxDurationSeconds = parseIntegerOption(options.maxDurationSeconds, "max-duration-seconds");
   const idleTimeoutSeconds = parseIntegerOption(options.idleTimeoutSeconds, "idle-timeout-seconds");
-  const databaseName =
-    typeof options.databaseName === "string" && options.databaseName.trim()
-      ? options.databaseName.trim()
-      : "";
-  const databaseStorageGb = parseIntegerOption(options.databaseStorageGb, "database-storage-gb");
   const volumeName =
     typeof options.volumeName === "string" && options.volumeName.trim()
       ? options.volumeName.trim()
@@ -3045,17 +3861,6 @@ function buildSandboxCreateInput(options: Record<string, string | boolean>): San
       ...(maxDurationSeconds !== undefined ? { maxDurationSeconds } : {}),
       ...(idleTimeoutSeconds !== undefined ? { idleTimeoutSeconds } : {}),
     },
-    ...(databaseName || databaseStorageGb !== undefined
-      ? {
-          databases: [
-            {
-              engine: "postgres",
-              ...(databaseName ? { name: databaseName } : {}),
-              ...(databaseStorageGb !== undefined ? { storageGb: databaseStorageGb } : {}),
-            },
-          ],
-        }
-      : {}),
     ...(volumeName || volumeMountPath || volumeStorageGb !== undefined
       ? {
           volumes: [

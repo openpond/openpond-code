@@ -27,16 +27,6 @@ export type SandboxQuotaPolicy = {
   maxSpendUsd: string;
 };
 
-export type SandboxDatabaseProvisionInput = {
-  engine: "postgres";
-  version?: string;
-  name?: string;
-  plan?: "dev";
-  storageGb?: number;
-  extensions?: string[];
-  publicAccess?: boolean;
-};
-
 export type SandboxVolumeProvisionInput = {
   name?: string;
   mountPath?: string;
@@ -121,7 +111,6 @@ export type SandboxCreateInput = {
   budget?: Partial<SandboxBudget>;
   networkPolicy?: Record<string, unknown>;
   quotas?: Partial<SandboxQuotaPolicy>;
-  databases?: SandboxDatabaseProvisionInput[];
   volumes?: SandboxVolumeProvisionInput[];
   integrationLeases?: SandboxIntegrationLeaseInput[];
   integrationConnectionLeases?: SandboxIntegrationConnectionLeaseInput[];
@@ -135,7 +124,6 @@ export type SandboxForkInput = {
   budget?: Partial<SandboxBudget>;
   networkPolicy?: Record<string, unknown>;
   quotas?: Partial<SandboxQuotaPolicy>;
-  databases?: SandboxDatabaseProvisionInput[];
   volumes?: SandboxVolumeProvisionInput[];
   integrationLeases?: SandboxIntegrationLeaseInput[];
   metadata?: Record<string, unknown>;
