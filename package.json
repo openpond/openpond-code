@@ -56,12 +56,15 @@
   "dependencies": {
     "@opentui/core": "^0.1.62",
     "@opentui/react": "^0.1.62",
+    "js-yaml": "^4.1.1",
     "react": "^19.2.3",
     "typescript": "^5.6.3",
-    "typescript-language-server": "^4.3.3"
+    "typescript-language-server": "^4.3.3",
+    "zod": "^4.1.13"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.5",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.19.24"
   }
 }

@@ -27,6 +27,23 @@ export type SandboxQuotaPolicy = {
   maxSpendUsd: string;
 };
 
+export type SandboxDatabaseProvisionInput = {
+  engine: "postgres";
+  version?: string;
+  name?: string;
+  plan?: "dev";
+  storageGb?: number;
+  extensions?: string[];
+  publicAccess?: boolean;
+};
+
+export type SandboxVolumeProvisionInput = {
+  name?: string;
+  mountPath?: string;
+  storageGb?: number;
+  deleteOnSandboxDelete?: boolean;
+};
+
 export type SandboxIntegrationProvider =
   | "google"
   | "slack"
@@ -104,6 +121,8 @@ export type SandboxCreateInput = {
   budget?: Partial<SandboxBudget>;
   networkPolicy?: Record<string, unknown>;
   quotas?: Partial<SandboxQuotaPolicy>;
+  databases?: SandboxDatabaseProvisionInput[];
+  volumes?: SandboxVolumeProvisionInput[];
   integrationLeases?: SandboxIntegrationLeaseInput[];
   integrationConnectionLeases?: SandboxIntegrationConnectionLeaseInput[];
   metadata?: Record<string, unknown>;
@@ -116,6 +135,8 @@ export type SandboxForkInput = {
   budget?: Partial<SandboxBudget>;
   networkPolicy?: Record<string, unknown>;
   quotas?: Partial<SandboxQuotaPolicy>;
+  databases?: SandboxDatabaseProvisionInput[];
+  volumes?: SandboxVolumeProvisionInput[];
   integrationLeases?: SandboxIntegrationLeaseInput[];
   metadata?: Record<string, unknown>;
 };
@@ -1685,11 +1706,23 @@ export class OpenPondSandboxClient {
     path: string,
     contents: string,
   ): Promise<SandboxFileUploadResponse> {
+    return this.uploadFileBase64(
+      sandboxId,
+      path,
+      Buffer.from(contents, "utf-8").toString("base64"),
+    );
+  }
+
+  uploadFileBase64(
+    sandboxId: string,
+    path: string,
+    contentsBase64: string,
+  ): Promise<SandboxFileUploadResponse> {
     return this.request<SandboxFileUploadResponse>(`/${encodeURIComponent(sandboxId)}/files`, {
       method: "POST",
       body: JSON.stringify({
         path,
-        contentsBase64: Buffer.from(contents, "utf-8").toString("base64"),
+        contentsBase64,
       }),
     });
   }

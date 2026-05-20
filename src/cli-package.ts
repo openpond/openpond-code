@@ -79,6 +79,14 @@ import {
   type SandboxTemplateBuildCreateInput,
   type SandboxTemplateBuildRecord,
 } from "./sandbox";
+import {
+  formatSandboxTemplateDiagnostics,
+  sandboxTemplateBuildMetadata,
+  sandboxTemplateExecutableEntries,
+  sandboxTemplateJsonSchema,
+  sandboxTemplateScaffoldFiles,
+  validateSandboxTemplateYaml,
+} from "./sandbox-template";
 
 const DEFAULT_OPENPOND_API_HOST = new URL(DEFAULT_OPENPOND_API_BASE_URL).hostname;
 const DEFAULT_OPENPOND_WEB_HOST = new URL(DEFAULT_OPENPOND_WEB_BASE_URL).hostname;
@@ -94,6 +102,7 @@ type Command =
   | "apps"
   | "repo"
   | "sandbox"
+  | "sandbox-template"
   | "organization"
   | "organizations"
   | "template"
@@ -729,6 +738,130 @@ async function runTemplateUpdate(
   console.log(JSON.stringify(result, null, 2));
 }
 
+async function runSandboxTemplateCommand(
+  options: Record<string, string | boolean>,
+  rest: string[],
+): Promise<void> {
+  const subcommand = rest[0] || "validate";
+
+  if (subcommand === "validate") {
+    const filePath = resolveSandboxTemplateFilePath(options);
+    const source = await fs.readFile(filePath, "utf8");
+    const result = validateSandboxTemplateYaml(source);
+    if (!result.ok) {
+      console.error(formatSandboxTemplateDiagnostics(result.diagnostics));
+      process.exitCode = 1;
+      return;
+    }
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          file: filePath,
+          name: result.manifest.name,
+          version: result.manifest.version,
+          start: result.manifest.start.command,
+          actions: result.manifest.actions.map((action) => action.name),
+          services: result.manifest.services.map((service) => service.name),
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "print-schema") {
+    console.log(JSON.stringify(sandboxTemplateJsonSchema(), null, 2));
+    return;
+  }
+
+  if (subcommand === "scaffold") {
+    const outputPath = resolveSandboxTemplateScaffoldPath(options);
+    const rawName =
+      typeof options.name === "string" && options.name.trim().length > 0
+        ? options.name.trim()
+        : path.basename(outputPath);
+    const description =
+      typeof options.description === "string" && options.description.trim().length > 0
+        ? options.description.trim()
+        : undefined;
+    const files = sandboxTemplateScaffoldFiles({ name: rawName, description });
+    const manifestPath = path.join(outputPath, "sandbox-template.yaml");
+    if (existsSync(manifestPath)) {
+      throw new Error(`sandbox-template.yaml already exists at ${manifestPath}`);
+    }
+    await fs.mkdir(outputPath, { recursive: true });
+    for (const [relativePath, contents] of Object.entries(files)) {
+      const filePath = path.join(outputPath, relativePath);
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(filePath, contents, "utf8");
+    }
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          path: outputPath,
+          files: Object.keys(files).sort((left, right) => left.localeCompare(right)),
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "build") {
+    const filePath = resolveSandboxTemplateFilePath(options);
+    const source = await fs.readFile(filePath, "utf8");
+    const result = validateSandboxTemplateYaml(source);
+    if (!result.ok) {
+      console.error(formatSandboxTemplateDiagnostics(result.diagnostics));
+      process.exitCode = 1;
+      return;
+    }
+    const metadata = sandboxTemplateBuildMetadata(result.manifest);
+    const executables = sandboxTemplateExecutableEntries(result.manifest);
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          file: filePath,
+          ...metadata,
+          startCommand: executables[0]?.command ?? null,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  throw new Error(
+    "usage: sandbox-template <validate|print-schema|scaffold|build> [--file sandbox-template.yaml] [--path <dir>] [--name <name>]",
+  );
+}
+
+function resolveSandboxTemplateFilePath(options: Record<string, string | boolean>): string {
+  const rawFile =
+    typeof options.file === "string" && options.file.trim().length > 0
+      ? options.file.trim()
+      : typeof options.manifest === "string" && options.manifest.trim().length > 0
+        ? options.manifest.trim()
+        : "sandbox-template.yaml";
+  return path.resolve(process.cwd(), rawFile);
+}
+
+function resolveSandboxTemplateScaffoldPath(options: Record<string, string | boolean>): string {
+  const rawPath =
+    typeof options.path === "string" && options.path.trim().length > 0
+      ? options.path.trim()
+      : typeof options.dir === "string" && options.dir.trim().length > 0
+        ? options.dir.trim()
+        : process.cwd();
+  return path.resolve(process.cwd(), rawPath);
+}
+
 function printHelp(): void {
   console.log("OpenPond CLI (API key only)");
   console.log("");
@@ -756,6 +889,10 @@ function printHelp(): void {
   console.log("  openpond template status <handle>/<repo>");
   console.log("  openpond template branches <handle>/<repo>");
   console.log("  openpond template update <handle>/<repo> [--env preview|production]");
+  console.log("  openpond sandbox-template validate [--file sandbox-template.yaml]");
+  console.log("  openpond sandbox-template print-schema");
+  console.log("  openpond sandbox-template scaffold [--path <dir>] [--name <name>]");
+  console.log("  openpond sandbox-template build [--file sandbox-template.yaml]");
   console.log(
     "  openpond repo create --name <name> [--team-id <id>] [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--env <json>] [--empty|--opentool] [--token] [--auto-schedule-migration <true|false>]",
   );
@@ -2860,6 +2997,24 @@ function buildSandboxCreateInput(options: Record<string, string | boolean>): San
   const diskGb = parseNumberOption(options.diskGb, "disk-gb");
   const maxDurationSeconds = parseIntegerOption(options.maxDurationSeconds, "max-duration-seconds");
   const idleTimeoutSeconds = parseIntegerOption(options.idleTimeoutSeconds, "idle-timeout-seconds");
+  const databaseName =
+    typeof options.databaseName === "string" && options.databaseName.trim()
+      ? options.databaseName.trim()
+      : "";
+  const databaseStorageGb = parseIntegerOption(options.databaseStorageGb, "database-storage-gb");
+  const volumeName =
+    typeof options.volumeName === "string" && options.volumeName.trim()
+      ? options.volumeName.trim()
+      : "";
+  const volumeMountPath =
+    typeof options.volumeMountPath === "string" && options.volumeMountPath.trim()
+      ? options.volumeMountPath.trim()
+      : "";
+  const volumeStorageGb = parseIntegerOption(options.volumeStorageGb, "volume-storage-gb");
+  const volumeDeleteOnSandboxDelete =
+    options.volumeDeleteOnSandboxDelete !== undefined
+      ? parseBooleanOption(options.volumeDeleteOnSandboxDelete)
+      : undefined;
   const integrationConnection =
     typeof options.integrationConnection === "string"
       ? options.integrationConnection.trim()
@@ -2889,6 +3044,31 @@ function buildSandboxCreateInput(options: Record<string, string | boolean>): San
       ...(maxDurationSeconds !== undefined ? { maxDurationSeconds } : {}),
       ...(idleTimeoutSeconds !== undefined ? { idleTimeoutSeconds } : {}),
     },
+    ...(databaseName || databaseStorageGb !== undefined
+      ? {
+          databases: [
+            {
+              engine: "postgres",
+              ...(databaseName ? { name: databaseName } : {}),
+              ...(databaseStorageGb !== undefined ? { storageGb: databaseStorageGb } : {}),
+            },
+          ],
+        }
+      : {}),
+    ...(volumeName || volumeMountPath || volumeStorageGb !== undefined
+      ? {
+          volumes: [
+            {
+              ...(volumeName ? { name: volumeName } : {}),
+              ...(volumeMountPath ? { mountPath: volumeMountPath } : {}),
+              ...(volumeStorageGb !== undefined ? { storageGb: volumeStorageGb } : {}),
+              ...(volumeDeleteOnSandboxDelete !== undefined
+                ? { deleteOnSandboxDelete: volumeDeleteOnSandboxDelete }
+                : {}),
+            },
+          ],
+        }
+      : {}),
     ...(integrationConnection
       ? {
           integrationConnectionLeases: [
@@ -4303,10 +4483,21 @@ async function runSandboxCommand(
         : typeof options.content === "string"
           ? options.content
           : "";
+    const contentsBase64 =
+      typeof options.contentsBase64 === "string"
+        ? options.contentsBase64.trim()
+        : typeof options.contentBase64 === "string"
+          ? options.contentBase64.trim()
+          : "";
     if (!sandboxId || !path) {
       throw new Error('usage: sandbox upload-file <sandboxId> --path <path> --contents "text"');
     }
-    const result = await client.uploadFile(sandboxId, path, contents);
+    if (!contents && !contentsBase64) {
+      throw new Error('usage: sandbox upload-file <sandboxId> --path <path> --contents "text"');
+    }
+    const result = contentsBase64
+      ? await client.uploadFileBase64(sandboxId, path, contentsBase64)
+      : await client.uploadFile(sandboxId, path, contents);
     console.log(
       JSON.stringify(
         {
@@ -4905,6 +5096,11 @@ async function main() {
     throw new Error(
       "usage: template <status|branches|update> <handle>/<repo> [--env preview|production]",
     );
+  }
+
+  if (command === "sandbox-template") {
+    await runSandboxTemplateCommand(options, rest);
+    return;
   }
 
   if (command === "repo") {
