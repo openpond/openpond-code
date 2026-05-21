@@ -19,7 +19,7 @@
     "build:types": "tsc --project tsconfig.package.json",
     "lint": "npm run typecheck",
     "typecheck": "npm run build:types",
-    "test": "node -e \"console.log('No automated tests configured')\"",
+    "test": "bun test",
     "build": "npm run build:cli && npm run build:package && npm run build:types",
     "prepublishOnly": "npm run build",
     "changeset": "changeset",

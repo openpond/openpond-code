@@ -18,6 +18,12 @@ export type SandboxBudget = {
   maxUsd: string;
 };
 
+export type SandboxEnvVarInput = {
+  name: string;
+  value?: string;
+  secretRef?: string;
+};
+
 export type SandboxQuotaPolicy = {
   maxDurationSeconds: number;
   idleTimeoutSeconds: number;
@@ -109,6 +115,7 @@ export type SandboxCreateInput = {
   visibility?: "private" | "team";
   resources?: Partial<SandboxResources>;
   budget?: Partial<SandboxBudget>;
+  env?: SandboxEnvVarInput[];
   networkPolicy?: Record<string, unknown>;
   quotas?: Partial<SandboxQuotaPolicy>;
   volumes?: SandboxVolumeProvisionInput[];
@@ -122,6 +129,7 @@ export type SandboxForkInput = {
   visibility?: "private" | "team";
   resources?: Partial<SandboxResources>;
   budget?: Partial<SandboxBudget>;
+  env?: SandboxEnvVarInput[];
   networkPolicy?: Record<string, unknown>;
   quotas?: Partial<SandboxQuotaPolicy>;
   volumes?: SandboxVolumeProvisionInput[];
@@ -134,6 +142,67 @@ export type SandboxTemplateLaunchInput = Omit<SandboxForkInput, "snapshotId"> & 
   templateName?: string;
   version?: string;
   useCase?: string;
+};
+
+export type SandboxSecretScope = "team" | "app" | "template";
+export type SandboxSecretStatus = "active" | "revoked" | "deleted";
+export type SandboxSecretAttachmentTarget =
+  | "sandbox"
+  | "template"
+  | "app"
+  | "replay";
+
+export type SandboxSecretAttachmentMetadata = {
+  envName: string;
+  targetType: SandboxSecretAttachmentTarget;
+  targetId: string;
+  attachedAt: string;
+  detachedAt: string | null;
+};
+
+export type SandboxSecretMetadata = {
+  id: string;
+  teamId: string;
+  ownerUserId: string;
+  name: string;
+  description: string | null;
+  scope: SandboxSecretScope;
+  status: SandboxSecretStatus;
+  secretRef: string;
+  currentVersion: number | null;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt: string | null;
+  deletedAt: string | null;
+  attachments?: SandboxSecretAttachmentMetadata[];
+};
+
+export type SandboxSecretCreateInput = {
+  teamId?: string;
+  name: string;
+  value: string;
+  description?: string;
+  scope?: SandboxSecretScope;
+};
+
+export type SandboxSecretRotateInput = {
+  teamId?: string;
+  value: string;
+};
+
+export type SandboxSecretAttachInput = {
+  teamId?: string;
+  envName: string;
+  targetType: "sandbox" | "template" | "app" | "replay";
+  targetId: string;
+};
+
+export type SandboxSecretListResponse = {
+  secrets: SandboxSecretMetadata[];
+};
+
+export type SandboxSecretResponse = {
+  secret: SandboxSecretMetadata;
 };
 
 export type SandboxExecInput = {
@@ -1158,6 +1227,103 @@ export class OpenPondSandboxClient {
     return this.request<{ sandboxes: SandboxRecord[] }>(
       query.size > 0 ? `?${query.toString()}` : "",
     ).then((payload) => payload.sandboxes);
+  }
+
+  listSecrets(input: {
+    teamId?: string;
+    appId?: string;
+  } = {}): Promise<SandboxSecretMetadata[]> {
+    const query = new URLSearchParams();
+    if (input.teamId) query.set("teamId", input.teamId);
+    if (input.appId) query.set("appId", input.appId);
+    return this.requestApiRoot<SandboxSecretListResponse>(
+      `/sandbox-secrets${query.size > 0 ? `?${query.toString()}` : ""}`,
+    ).then((payload) => payload.secrets);
+  }
+
+  getSecret(
+    secretId: string,
+    input: { teamId?: string; appId?: string } = {},
+  ): Promise<SandboxSecretMetadata> {
+    const query = new URLSearchParams();
+    if (input.teamId) query.set("teamId", input.teamId);
+    if (input.appId) query.set("appId", input.appId);
+    return this.requestApiRoot<SandboxSecretResponse>(
+      `/sandbox-secrets/${encodeURIComponent(secretId)}${
+        query.size > 0 ? `?${query.toString()}` : ""
+      }`,
+    ).then((payload) => payload.secret);
+  }
+
+  createSecret(input: SandboxSecretCreateInput): Promise<SandboxSecretMetadata> {
+    return this.requestApiRoot<SandboxSecretResponse>("/sandbox-secrets", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((payload) => payload.secret);
+  }
+
+  rotateSecret(
+    secretId: string,
+    input: SandboxSecretRotateInput,
+  ): Promise<SandboxSecretMetadata> {
+    const query = new URLSearchParams();
+    if (input.teamId) query.set("teamId", input.teamId);
+    const { teamId: _teamId, ...body } = input;
+    return this.requestApiRoot<SandboxSecretResponse>(
+      `/sandbox-secrets/${encodeURIComponent(secretId)}/rotate${
+        query.size > 0 ? `?${query.toString()}` : ""
+      }`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    ).then((payload) => payload.secret);
+  }
+
+  attachSecret(
+    secretId: string,
+    input: SandboxSecretAttachInput,
+  ): Promise<SandboxSecretMetadata> {
+    const query = new URLSearchParams();
+    if (input.teamId) query.set("teamId", input.teamId);
+    const { teamId: _teamId, ...body } = input;
+    return this.requestApiRoot<SandboxSecretResponse>(
+      `/sandbox-secrets/${encodeURIComponent(secretId)}/attach${
+        query.size > 0 ? `?${query.toString()}` : ""
+      }`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    ).then((payload) => payload.secret);
+  }
+
+  revokeSecret(
+    secretId: string,
+    input: { teamId?: string } = {},
+  ): Promise<SandboxSecretMetadata> {
+    const query = new URLSearchParams();
+    if (input.teamId) query.set("teamId", input.teamId);
+    return this.requestApiRoot<SandboxSecretResponse>(
+      `/sandbox-secrets/${encodeURIComponent(secretId)}/revoke${
+        query.size > 0 ? `?${query.toString()}` : ""
+      }`,
+      { method: "POST" },
+    ).then((payload) => payload.secret);
+  }
+
+  deleteSecret(
+    secretId: string,
+    input: { teamId?: string } = {},
+  ): Promise<SandboxSecretMetadata> {
+    const query = new URLSearchParams();
+    if (input.teamId) query.set("teamId", input.teamId);
+    return this.requestApiRoot<SandboxSecretResponse>(
+      `/sandbox-secrets/${encodeURIComponent(secretId)}${
+        query.size > 0 ? `?${query.toString()}` : ""
+      }`,
+      { method: "DELETE" },
+    ).then((payload) => payload.secret);
   }
 
   snapshotCatalog(

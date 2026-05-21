@@ -69,11 +69,13 @@ import {
   type OpenPondOrganizationRole,
   type OpenPondOrganizationUpdateInput,
   type SandboxCreateInput,
+  type SandboxEnvVarInput,
   type SandboxIntegrationConnectionLeaseInput,
   type SandboxRecord,
   type SandboxReplayArtifact,
   type SandboxReplayInput,
   type SandboxReplayRecord,
+  type SandboxSecretMetadata,
   type SandboxSnapshotValidateInput,
   type SandboxSmokeOptions,
   type SandboxTemplateBuildCreateInput,
@@ -81,12 +83,16 @@ import {
 } from "./sandbox";
 import {
   OPENPOND_MANIFEST_FILE_NAME,
+  SANDBOX_TEMPLATE_BUILD_PLAN_FILE_NAME,
+  SANDBOX_TEMPLATE_BUILD_PLAN_KIND,
   formatSandboxTemplateDiagnostics,
+  sandboxTemplateBuildPlan,
   sandboxTemplateBuildMetadata,
   sandboxTemplateExecutableEntries,
   sandboxTemplateJsonSchema,
   sandboxTemplateScaffoldFiles,
   validateSandboxTemplateYaml,
+  type SandboxTemplateBuildPlan,
   type SandboxTemplateExecutable,
   type SandboxTemplateManifest,
   type SandboxTemplatePort,
@@ -400,6 +406,185 @@ function parseCsvOption(value: string | boolean | undefined): string[] {
     .filter(Boolean);
 }
 
+function parseSandboxEnvOptions(
+  options: Record<string, string | boolean>,
+): SandboxEnvVarInput[] {
+  const refs = parseSandboxEnvAssignments(options.envRef, "env-ref").map(
+    ({ name, value }) => ({ name, secretRef: value }),
+  );
+  const literals = parseSandboxEnvAssignments(
+    options.envLiteral,
+    "env-literal",
+  ).map(({ name, value }) => {
+    if (
+      isSecretLikeEnvName(name) &&
+      !parseBooleanOption(options.allowPlainSecretEnv)
+    ) {
+      throw new Error(
+        `refusing plaintext value for secret-like env ${name}; create a sandbox secret and pass --env-ref ${name}=openpond://secret/...`,
+      );
+    }
+    return { name, value };
+  });
+  const env = [...refs, ...literals];
+  const names = new Set<string>();
+  for (const item of env) {
+    if (names.has(item.name)) {
+      throw new Error(`duplicate sandbox env var: ${item.name}`);
+    }
+    names.add(item.name);
+  }
+  return env;
+}
+
+function parseSandboxTemplateEnvOptions(
+  manifest: SandboxTemplateManifest,
+  options: Record<string, string | boolean>,
+): SandboxEnvVarInput[] {
+  const env = parseSandboxEnvOptions(options);
+  const provided = new Set(env.map((item) => item.name));
+  const providedByName = new Map(env.map((item) => [item.name, item]));
+  for (const requirement of manifest.inputs.env) {
+    const value = providedByName.get(requirement.name);
+    if (value?.value !== undefined && requirement.secret !== false) {
+      throw new Error(
+        `sandbox template env ${requirement.name} requires a secret ref. Pass --env-ref ${requirement.name}=openpond://secret/...`,
+      );
+    }
+  }
+  const missing = manifest.inputs.env
+    .filter((item) => item.required && !provided.has(item.name))
+    .map((item) => item.name);
+  if (missing.length > 0) {
+    throw new Error(
+      `missing required sandbox template env refs: ${missing.join(", ")}. Pass --env-ref NAME=openpond://secret/...`,
+    );
+  }
+  return env;
+}
+
+function parseSandboxEnvAssignments(
+  value: string | boolean | undefined,
+  label: string,
+): Array<{ name: string; value: string }> {
+  if (typeof value !== "string") return [];
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const separator = item.indexOf("=");
+      if (separator <= 0) {
+        throw new Error(`${label} entries must use NAME=value`);
+      }
+      const name = item.slice(0, separator).trim();
+      const entryValue = item.slice(separator + 1).trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+        throw new Error(`${label} has invalid env name: ${name}`);
+      }
+      if (!entryValue) {
+        throw new Error(`${label} value is required for ${name}`);
+      }
+      return { name, value: entryValue };
+    });
+}
+
+function isSecretLikeEnvName(name: string): boolean {
+  return /(?:SECRET|TOKEN|KEY|PASSWORD|PASSWD|PRIVATE|CREDENTIAL|DATABASE_URL|DSN)/i.test(
+    name,
+  );
+}
+
+async function readSandboxSecretValue(
+  options: Record<string, string | boolean>,
+  label: string,
+): Promise<string> {
+  if (typeof options.value === "string" || typeof options.secretValue === "string") {
+    throw new Error("sandbox secret values must be provided with --stdin or the masked prompt");
+  }
+  const useStdin = parseBooleanOption(options.stdin);
+  if (useStdin) {
+    const value = await readAllStdin();
+    if (!value) throw new Error(`${label} read no secret value from stdin`);
+    return value;
+  }
+  if (!process.stdin.isTTY) {
+    throw new Error(`${label} requires --stdin when not running in a TTY`);
+  }
+  const value = await readMaskedLine(`${label}: `);
+  if (!value) throw new Error(`${label} cannot be empty`);
+  return value;
+}
+
+async function readAllStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+  }
+  return Buffer.concat(chunks).toString("utf8").replace(/\r?\n$/, "");
+}
+
+function readMaskedLine(prompt: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const stdin = process.stdin;
+    const stderr = process.stderr;
+    let value = "";
+    const wasRaw = stdin.isRaw;
+
+    function cleanup() {
+      stdin.off("data", onData);
+      if (stdin.setRawMode) stdin.setRawMode(wasRaw);
+      stdin.pause();
+      stderr.write("\n");
+    }
+
+    function onData(chunk: Buffer | string) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      for (const byte of buffer) {
+        if (byte === 3) {
+          cleanup();
+          reject(new Error("secret prompt cancelled"));
+          return;
+        }
+        if (byte === 13 || byte === 10) {
+          cleanup();
+          resolve(value);
+          return;
+        }
+        if (byte === 127 || byte === 8) {
+          if (value.length > 0) {
+            value = value.slice(0, -1);
+            stderr.write("\b \b");
+          }
+          continue;
+        }
+        value += Buffer.from([byte]).toString("utf8");
+        stderr.write("*");
+      }
+    }
+
+    stderr.write(prompt);
+    stdin.resume();
+    if (stdin.setRawMode) stdin.setRawMode(true);
+    stdin.on("data", onData);
+  });
+}
+
+function summarizeSandboxSecret(secret: SandboxSecretMetadata): Record<string, unknown> {
+  return {
+    id: secret.id,
+    teamId: secret.teamId,
+    name: secret.name,
+    scope: secret.scope,
+    status: secret.status,
+    secretRef: secret.secretRef,
+    currentVersion: secret.currentVersion,
+    updatedAt: secret.updatedAt,
+    lastUsedAt: secret.lastUsedAt,
+    attachedDestinations: secret.attachments?.length ?? 0,
+  };
+}
+
 function parseTimeOption(value: string | boolean | undefined, label: string): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -515,6 +700,48 @@ async function runCommand(
     proc.on("error", reject);
     proc.on("close", (code) => {
       resolve({ code, stdout, stderr });
+    });
+  });
+}
+
+async function runShellCommand(
+  command: string,
+  options: {
+    cwd?: string;
+    env?: Record<string, string>;
+    timeoutSeconds?: number;
+    inherit?: boolean;
+  } = {},
+): Promise<CommandResult & { timedOut: boolean }> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(command, {
+      cwd: options.cwd,
+      env: { ...process.env, ...(options.env ?? {}) },
+      shell: true,
+      stdio: options.inherit ? "inherit" : "pipe",
+    });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (options.timeoutSeconds && options.timeoutSeconds > 0) {
+      timer = setTimeout(() => {
+        timedOut = true;
+        proc.kill("SIGTERM");
+      }, options.timeoutSeconds * 1000);
+    }
+    if (!options.inherit) {
+      proc.stdout?.on("data", (chunk) => {
+        stdout += String(chunk);
+      });
+      proc.stderr?.on("data", (chunk) => {
+        stderr += String(chunk);
+      });
+    }
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (timer) clearTimeout(timer);
+      resolve({ code, stdout, stderr, timedOut });
     });
   });
 }
@@ -816,28 +1043,22 @@ async function runSandboxTemplateCommand(
   }
 
   if (subcommand === "build") {
-    const filePath = resolveSandboxTemplateFilePath(options);
-    const source = await fs.readFile(filePath, "utf8");
-    const result = validateSandboxTemplateYaml(source);
-    if (!result.ok) {
-      console.error(formatSandboxTemplateDiagnostics(result.diagnostics));
-      process.exitCode = 1;
-      return;
-    }
-    const metadata = sandboxTemplateBuildMetadata(result.manifest);
-    const executables = sandboxTemplateExecutableEntries(result.manifest);
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          file: filePath,
-          ...metadata,
-          startCommand: executables[0]?.command ?? null,
-        },
-        null,
-        2,
-      ),
-    );
+    await runSandboxTemplateBuild(options);
+    return;
+  }
+
+  if (subcommand === "run") {
+    await runSandboxTemplateLocal(options, "run");
+    return;
+  }
+
+  if (subcommand === "dev") {
+    await runSandboxTemplateLocal(options, "dev");
+    return;
+  }
+
+  if (subcommand === "action") {
+    await runSandboxTemplateExistingSandboxAction(options, rest.slice(1));
     return;
   }
 
@@ -847,8 +1068,120 @@ async function runSandboxTemplateCommand(
   }
 
   throw new Error(
-    `usage: sandbox-template <validate|print-schema|scaffold|build|start> [--file ${OPENPOND_MANIFEST_FILE_NAME}] [--path <dir>] [--name <name>]`,
+    `usage: sandbox-template <validate|print-schema|scaffold|build|run|dev|start|action> [--file ${OPENPOND_MANIFEST_FILE_NAME}] [--path <dir>] [--name <name>]`,
   );
+}
+
+async function runSandboxTemplateBuild(
+  options: Record<string, string | boolean>,
+): Promise<void> {
+  const context = await loadSandboxTemplateManifestContext(options);
+  const outputPath = resolveSandboxTemplateBuildOutputPath(options, context.projectPath);
+  const plan = sandboxTemplateBuildPlan({
+    manifest: context.manifest,
+    manifestFile: path.relative(context.projectPath, context.filePath) || OPENPOND_MANIFEST_FILE_NAME,
+    projectRoot: path.relative(path.dirname(outputPath), context.projectPath) || ".",
+  });
+  const shouldWrite = !parseBooleanOption(options.noWrite);
+  if (shouldWrite) {
+    await fs.mkdir(path.dirname(outputPath), { recursive: true });
+    await fs.writeFile(outputPath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
+  }
+  const metadata = sandboxTemplateBuildMetadata(context.manifest);
+  const executables = sandboxTemplateExecutableEntries(context.manifest);
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        file: context.filePath,
+        output: shouldWrite ? outputPath : null,
+        ...metadata,
+        startCommand: executables[0]?.command ?? null,
+        plan,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function loadSandboxTemplateManifestContext(
+  options: Record<string, string | boolean>,
+): Promise<{
+  filePath: string;
+  projectPath: string;
+  manifest: SandboxTemplateManifest;
+}> {
+  const filePath = resolveSandboxTemplateFilePath(options);
+  const source = await fs.readFile(filePath, "utf8");
+  const result = validateSandboxTemplateYaml(source);
+  if (!result.ok) {
+    process.exitCode = 1;
+    throw new Error(formatSandboxTemplateDiagnostics(result.diagnostics));
+  }
+  return {
+    filePath,
+    projectPath: path.dirname(filePath),
+    manifest: result.manifest,
+  };
+}
+
+function resolveSandboxTemplateBuildOutputPath(
+  options: Record<string, string | boolean>,
+  projectPath: string,
+): string {
+  const rawOutput =
+    typeof options.output === "string" && options.output.trim()
+      ? options.output.trim()
+      : typeof options.out === "string" && options.out.trim()
+        ? options.out.trim()
+        : "";
+  if (rawOutput) return path.resolve(process.cwd(), rawOutput);
+  const rawOutputDir =
+    typeof options.outputDir === "string" && options.outputDir.trim()
+      ? options.outputDir.trim()
+      : typeof options.outDir === "string" && options.outDir.trim()
+        ? options.outDir.trim()
+        : "dist";
+  return path.resolve(projectPath, rawOutputDir, SANDBOX_TEMPLATE_BUILD_PLAN_FILE_NAME);
+}
+
+async function loadSandboxTemplateBuildPlan(
+  options: Record<string, string | boolean>,
+): Promise<{
+  plan: SandboxTemplateBuildPlan;
+  filePath: string;
+  projectPath: string;
+}> {
+  const rawBuild =
+    typeof options.build === "string" && options.build.trim()
+      ? options.build.trim()
+      : typeof options.plan === "string" && options.plan.trim()
+        ? options.plan.trim()
+        : "";
+  if (rawBuild) {
+    const filePath = path.resolve(process.cwd(), rawBuild);
+    const parsed = JSON.parse(await fs.readFile(filePath, "utf8")) as SandboxTemplateBuildPlan;
+    if (parsed.kind !== SANDBOX_TEMPLATE_BUILD_PLAN_KIND || parsed.schemaVersion !== 1) {
+      throw new Error(`invalid sandbox template build plan: ${filePath}`);
+    }
+    return {
+      plan: parsed,
+      filePath,
+      projectPath: path.resolve(path.dirname(filePath), parsed.projectRoot),
+    };
+  }
+
+  const context = await loadSandboxTemplateManifestContext(options);
+  return {
+    plan: sandboxTemplateBuildPlan({
+      manifest: context.manifest,
+      manifestFile: path.relative(context.projectPath, context.filePath) || OPENPOND_MANIFEST_FILE_NAME,
+      projectRoot: context.projectPath,
+    }),
+    filePath: context.filePath,
+    projectPath: context.projectPath,
+  };
 }
 
 type SandboxTemplateScalarInputs = Record<string, unknown>;
@@ -871,6 +1204,359 @@ type SandboxTemplateUploadedFile = {
   sandboxPath: string;
   sizeBytes: number;
 };
+
+type LocalSandboxTemplateVolume = {
+  name: string | null;
+  mountPath: string;
+  localPath: string;
+};
+
+type LocalSandboxTemplateCommandResult = {
+  command: string;
+  cwd: string;
+  status: "succeeded" | "failed" | "timed_out";
+  output: string;
+  exitCode: number | null;
+};
+
+async function runSandboxTemplateLocal(
+  options: Record<string, string | boolean>,
+  mode: "run" | "dev",
+): Promise<void> {
+  const { plan, filePath, projectPath } = await loadSandboxTemplateBuildPlan(options);
+  const executable = resolveSandboxTemplateLocalExecutable(plan.manifest, options, mode);
+  const input = await resolveSandboxTemplateStartInput(plan.manifest, options, projectPath);
+  const volumes = await prepareLocalSandboxTemplateVolumes(plan.manifest, projectPath);
+  const setupCommands = await runLocalSandboxTemplateSetupCommands(plan.manifest, projectPath, options);
+  const uploadedFiles = await prepareLocalSandboxTemplateUploads(input.uploadRequests, projectPath);
+  const commandInput = {
+    ...input.scalars,
+    ...formatUploadedFileParams(uploadedFiles, input.uploadRequests),
+  };
+  const replay = await writeLocalSandboxTemplateReplayParams(projectPath, executable, commandInput);
+  const previews = localSandboxTemplatePreviews(executable);
+  if (mode === "dev" || executable.kind === "service") {
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          mode,
+          file: filePath,
+          template: plan.manifest.name,
+          executable: summarizeSandboxTemplateExecutable(executable),
+          volumes,
+          setupCommands,
+          uploadedFiles,
+          input: commandInput,
+          replayParamsPath: replay.paramsPath,
+          previews,
+          status: "starting",
+        },
+        null,
+        2,
+      ),
+    );
+    const result = await runLocalSandboxTemplateCommand(projectPath, executable, replay, {
+      inherit: true,
+      timeoutSeconds: executable.timeoutSeconds,
+    });
+    if (result.status !== "succeeded") process.exitCode = 1;
+    return;
+  }
+
+  const execution = await runLocalSandboxTemplateCommand(projectPath, executable, replay, {
+    timeoutSeconds: executable.timeoutSeconds ?? 900,
+  });
+  const artifacts = await collectLocalSandboxTemplateArtifacts(projectPath, executable.artifactPaths);
+  if (execution.status !== "succeeded") process.exitCode = 1;
+  console.log(
+    JSON.stringify(
+      {
+        ok: execution.status === "succeeded",
+        mode,
+        file: filePath,
+        template: plan.manifest.name,
+        executable: summarizeSandboxTemplateExecutable(executable),
+        volumes,
+        setupCommands,
+        uploadedFiles,
+        input: commandInput,
+        replayParamsPath: replay.paramsPath,
+        execution,
+        previews,
+        artifacts,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function runSandboxTemplateExistingSandboxAction(
+  options: Record<string, string | boolean>,
+  rest: string[],
+): Promise<void> {
+  const sandboxId =
+    rest[0]?.trim() ||
+    (typeof options.sandboxId === "string" ? options.sandboxId.trim() : "");
+  const actionName =
+    rest[1]?.trim() ||
+    (typeof options.action === "string" ? options.action.trim() : "") ||
+    (typeof options.target === "string" ? options.target.trim() : "");
+  if (!sandboxId || !actionName) {
+    throw new Error(`usage: sandbox-template action <sandboxId> <actionName> [--file ${OPENPOND_MANIFEST_FILE_NAME}]`);
+  }
+  const { plan, filePath, projectPath } = await loadSandboxTemplateBuildPlan(options);
+  const executable = resolveSandboxTemplateActionExecutable(plan.manifest, actionName);
+  const input = await resolveSandboxTemplateStartInput(plan.manifest, options, projectPath);
+  const client = await resolveSandboxClient(options);
+  const uploadedFiles = await uploadSandboxTemplateStartFiles(
+    client,
+    sandboxId,
+    input.uploadRequests,
+  );
+  const commandInput = {
+    ...input.scalars,
+    ...formatUploadedFileParams(uploadedFiles, input.uploadRequests),
+  };
+  const execution = await runSandboxTemplateExecutable(client, sandboxId, executable, commandInput);
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        file: filePath,
+        sandboxId,
+        executable: summarizeSandboxTemplateExecutable(executable),
+        uploadedFiles,
+        input: commandInput,
+        execution,
+        expectedArtifacts: executable.artifactPaths,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+function resolveSandboxTemplateLocalExecutable(
+  manifest: SandboxTemplateManifest,
+  options: Record<string, string | boolean>,
+  mode: "run" | "dev",
+): SandboxTemplateExecutable {
+  if (
+    mode === "dev" &&
+    typeof options.target !== "string" &&
+    typeof options.action !== "string" &&
+    typeof options.service !== "string" &&
+    typeof options.entrypoint !== "string"
+  ) {
+    const firstService = sandboxTemplateExecutableEntries(manifest).find(
+      (candidate) => candidate.kind === "service",
+    );
+    if (firstService) return firstService;
+  }
+  return resolveSandboxTemplateStartExecutable(manifest, options);
+}
+
+function resolveSandboxTemplateActionExecutable(
+  manifest: SandboxTemplateManifest,
+  actionName: string,
+): SandboxTemplateExecutable {
+  const match = sandboxTemplateExecutableEntries(manifest).find(
+    (candidate) => candidate.kind === "action" && candidate.name === actionName,
+  );
+  if (!match) {
+    const actions = manifest.actions.map((action) => action.name).join(", ") || "(none)";
+    throw new Error(`manifest action not found: ${actionName}. Available actions: ${actions}`);
+  }
+  return match;
+}
+
+function summarizeSandboxTemplateExecutable(executable: SandboxTemplateExecutable): Record<string, unknown> {
+  return {
+    kind: executable.kind,
+    name: executable.name,
+    command: executable.command,
+    cwd: executable.cwd ?? null,
+    timeoutSeconds: executable.timeoutSeconds ?? null,
+    ports: executable.ports,
+    artifactPaths: executable.artifactPaths,
+  };
+}
+
+async function prepareLocalSandboxTemplateVolumes(
+  manifest: SandboxTemplateManifest,
+  projectPath: string,
+): Promise<LocalSandboxTemplateVolume[]> {
+  const volumes: LocalSandboxTemplateVolume[] = [];
+  for (const volume of manifest.volumes) {
+    const mountPath =
+      typeof volume.mountPath === "string" && volume.mountPath.trim()
+        ? volume.mountPath.trim()
+        : volume.name
+          ? `/workspace/volumes/${volume.name}`
+          : "";
+    if (!mountPath) continue;
+    const localPath = path.resolve(projectPath, normalizeLocalWorkspacePath(mountPath));
+    await fs.mkdir(localPath, { recursive: true });
+    volumes.push({
+      name: volume.name ?? null,
+      mountPath,
+      localPath,
+    });
+  }
+  return volumes;
+}
+
+async function runLocalSandboxTemplateSetupCommands(
+  manifest: SandboxTemplateManifest,
+  projectPath: string,
+  options: Record<string, string | boolean>,
+): Promise<LocalSandboxTemplateCommandResult[]> {
+  const timeoutSeconds =
+    parseIntegerOption(options.setupTimeoutSeconds, "setup-timeout-seconds") ?? 900;
+  const results: LocalSandboxTemplateCommandResult[] = [];
+  for (const command of manifest.setup.commands) {
+    const result = await runLocalShellCommandResult(command, projectPath, {
+      timeoutSeconds,
+    });
+    results.push(result);
+    if (result.status !== "succeeded") {
+      throw new Error(`local setup command failed: ${command}\n${result.output}`);
+    }
+  }
+  return results;
+}
+
+async function prepareLocalSandboxTemplateUploads(
+  requests: SandboxTemplateUploadRequest[],
+  projectPath: string,
+): Promise<SandboxTemplateUploadedFile[]> {
+  const uploaded: SandboxTemplateUploadedFile[] = [];
+  for (const request of requests) {
+    for (const localPath of request.localPaths) {
+      const contents = await fs.readFile(localPath);
+      const sandboxPath = joinSandboxUploadPath(
+        request.spec.targetPath,
+        path.basename(localPath),
+      );
+      const destination = path.resolve(projectPath, normalizeLocalWorkspacePath(sandboxPath));
+      await fs.mkdir(path.dirname(destination), { recursive: true });
+      await fs.copyFile(localPath, destination);
+      uploaded.push({
+        inputName: request.inputName,
+        localPath,
+        sandboxPath,
+        sizeBytes: contents.byteLength,
+      });
+    }
+  }
+  return uploaded;
+}
+
+async function writeLocalSandboxTemplateReplayParams(
+  projectPath: string,
+  executable: SandboxTemplateExecutable,
+  input: SandboxTemplateScalarInputs,
+): Promise<{ paramsPath: string; encoded: string }> {
+  const paramsJson = `${JSON.stringify({ input }, null, 2)}\n`;
+  const encoded = Buffer.from(paramsJson, "utf8").toString("base64");
+  const paramsPath = path.join(projectPath, "openpond-replay-params.json");
+  await fs.writeFile(paramsPath, paramsJson, "utf8");
+  if (executable.cwd) {
+    const cwdParamsPath = path.join(projectPath, executable.cwd, "openpond-replay-params.json");
+    if (cwdParamsPath !== paramsPath) {
+      await fs.mkdir(path.dirname(cwdParamsPath), { recursive: true });
+      await fs.writeFile(cwdParamsPath, paramsJson, "utf8");
+    }
+  }
+  return { paramsPath, encoded };
+}
+
+async function runLocalSandboxTemplateCommand(
+  projectPath: string,
+  executable: SandboxTemplateExecutable,
+  replay: { encoded: string },
+  options: { timeoutSeconds?: number; inherit?: boolean } = {},
+): Promise<LocalSandboxTemplateCommandResult> {
+  const cwd = executable.cwd
+    ? path.resolve(projectPath, executable.cwd)
+    : projectPath;
+  return runLocalShellCommandResult(executable.command, cwd, {
+    env: {
+      OPENPOND_REPLAY_PARAMS_BASE64: replay.encoded,
+    },
+    timeoutSeconds: options.timeoutSeconds,
+    inherit: options.inherit,
+  });
+}
+
+async function runLocalShellCommandResult(
+  command: string,
+  cwd: string,
+  options: {
+    env?: Record<string, string>;
+    timeoutSeconds?: number;
+    inherit?: boolean;
+  } = {},
+): Promise<LocalSandboxTemplateCommandResult> {
+  const result = await runShellCommand(command, {
+    cwd,
+    env: options.env,
+    timeoutSeconds: options.timeoutSeconds,
+    inherit: options.inherit,
+  });
+  const output = [result.stdout, result.stderr].filter(Boolean).join("");
+  return {
+    command,
+    cwd,
+    status: result.timedOut ? "timed_out" : result.code === 0 ? "succeeded" : "failed",
+    output,
+    exitCode: result.code,
+  };
+}
+
+function localSandboxTemplatePreviews(
+  executable: SandboxTemplateExecutable,
+): Array<Record<string, unknown>> {
+  return executable.ports.map((port) => ({
+    port: port.port,
+    label: port.label ?? null,
+    access: port.access,
+    url: `http://127.0.0.1:${port.port}${port.path}`,
+  }));
+}
+
+async function collectLocalSandboxTemplateArtifacts(
+  projectPath: string,
+  artifactPaths: string[],
+): Promise<Array<{ path: string; exists: boolean; sizeBytes: number | null }>> {
+  const artifacts = [];
+  for (const artifactPath of artifactPaths) {
+    const localPath = path.resolve(projectPath, normalizeLocalWorkspacePath(artifactPath));
+    try {
+      const stat = await fs.stat(localPath);
+      artifacts.push({ path: artifactPath, exists: stat.isFile(), sizeBytes: stat.size });
+    } catch {
+      artifacts.push({ path: artifactPath, exists: false, sizeBytes: null });
+    }
+  }
+  return artifacts;
+}
+
+function normalizeLocalWorkspacePath(value: string): string {
+  const normalized = value
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\/workspace\//, "")
+    .replace(/^workspace\//, "")
+    .replace(/^\.\//, "")
+    .replace(/^\/+/, "");
+  if (!normalized || normalized.split("/").some((segment) => segment === ".." || segment === "")) {
+    throw new Error(`invalid workspace path: ${value}`);
+  }
+  return normalized;
+}
 
 async function runSandboxTemplateStart(options: Record<string, string | boolean>): Promise<void> {
   const filePath = resolveSandboxTemplateFilePath(options);
@@ -936,9 +1622,10 @@ function resolveSandboxTemplateStartExecutable(
   const executables = sandboxTemplateExecutableEntries(manifest);
   const action = typeof options.action === "string" ? options.action.trim() : "";
   const service = typeof options.service === "string" ? options.service.trim() : "";
+  const target = typeof options.target === "string" ? options.target.trim() : "";
   const entrypoint =
     typeof options.entrypoint === "string" ? options.entrypoint.trim() : "";
-  const requested = action || service || entrypoint || "start";
+  const requested = action || service || target || entrypoint || "start";
   const kind = action ? "action" : service ? "service" : "";
   const match = executables.find(
     (candidate) =>
@@ -969,6 +1656,7 @@ function buildSandboxTemplateStartCreateInput(
   const idleTimeoutSeconds = parseIntegerOption(options.idleTimeoutSeconds, "idle-timeout-seconds");
   const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
   const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+  const env = parseSandboxTemplateEnvOptions(manifest, options);
   return {
     repo,
     ...(teamId ? { teamId } : {}),
@@ -980,6 +1668,7 @@ function buildSandboxTemplateStartCreateInput(
       ...(maxDurationSeconds !== undefined ? { maxDurationSeconds } : {}),
       ...(idleTimeoutSeconds !== undefined ? { idleTimeoutSeconds } : {}),
     },
+    ...(env.length > 0 ? { env } : {}),
     volumes: manifest.volumes,
     metadata: {
       source: "openpond-code-sandbox-template-start",
@@ -1425,6 +2114,9 @@ function normalizeSandboxUploadTargetPath(value: string): string {
   if (!normalized || normalized.split("/").some((segment) => segment === ".." || segment === "")) {
     throw new Error(`invalid upload target path: ${value}`);
   }
+  if (normalized.split("/").some(isSandboxEnvFileName)) {
+    throw new Error("sandbox template uploads cannot target .env* files; create sandbox secrets and pass refs with --env-ref");
+  }
   return normalized;
 }
 
@@ -1451,6 +2143,7 @@ async function expandSandboxTemplateUploadPath(
 ): Promise<string[]> {
   const absolute = path.resolve(projectPath, rawValue);
   if (!rawValue.includes("*")) {
+    assertSandboxTemplateUploadPathAllowed(absolute);
     const stats = await fs.stat(absolute);
     if (!stats.isFile()) {
       throw new Error(`upload path is not a file: ${absolute}`);
@@ -1461,11 +2154,26 @@ async function expandSandboxTemplateUploadPath(
   const basename = path.basename(absolute);
   const regex = globBasenameToRegExp(basename);
   const entries = await fs.readdir(directory, { withFileTypes: true });
-  const matches = entries
+  const matchingEntries = entries
     .filter((entry) => entry.isFile() && regex.test(entry.name))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const blocked = matchingEntries.find((entry) => isSandboxEnvFileName(entry.name));
+  if (blocked) {
+    throw new Error("sandbox template uploads cannot include .env* files; create sandbox secrets and pass refs with --env-ref");
+  }
+  return matchingEntries
     .map((entry) => path.join(directory, entry.name))
     .sort((left, right) => left.localeCompare(right));
-  return matches;
+}
+
+function assertSandboxTemplateUploadPathAllowed(localPath: string): void {
+  if (isSandboxEnvFileName(path.basename(localPath))) {
+    throw new Error("sandbox template uploads cannot include .env* files; create sandbox secrets and pass refs with --env-ref");
+  }
+}
+
+function isSandboxEnvFileName(name: string): boolean {
+  return name === ".env" || name.startsWith(".env.");
 }
 
 function globBasenameToRegExp(pattern: string): RegExp {
@@ -1632,11 +2340,17 @@ async function runSandboxTemplateProcessToCompletion(
 }
 
 function formatSandboxTemplateCommand(executable: SandboxTemplateExecutable): string {
-  const paramsPath = quoteShellArg("openpond-replay-params.json");
+  const paramsPath = quoteShellArg(replayParamsPathForExecutable(executable));
   const envPrefix = `OPENPOND_REPLAY_PARAMS_BASE64="$(base64 -w0 ${paramsPath} 2>/dev/null || base64 ${paramsPath} | tr -d '\\n')"`;
   const command = `${envPrefix} ${executable.command}`;
   if (!executable.cwd) return command;
   return `cd ${quoteShellArg(executable.cwd)} && ${command}`;
+}
+
+function replayParamsPathForExecutable(executable: SandboxTemplateExecutable): string {
+  if (!executable.cwd) return "openpond-replay-params.json";
+  const cwd = executable.cwd.replace(/\\/g, "/").replace(/\/+$/, "") || ".";
+  return path.posix.relative(cwd, "openpond-replay-params.json") || "openpond-replay-params.json";
 }
 
 function quoteShellArg(value: string): string {
@@ -1711,10 +2425,13 @@ function printHelp(): void {
   console.log(`  openpond sandbox-template validate [--file ${OPENPOND_MANIFEST_FILE_NAME}]`);
   console.log("  openpond sandbox-template print-schema");
   console.log("  openpond sandbox-template scaffold [--path <dir>] [--name <name>]");
-  console.log(`  openpond sandbox-template build [--file ${OPENPOND_MANIFEST_FILE_NAME}]`);
+  console.log(`  openpond sandbox-template build [--file ${OPENPOND_MANIFEST_FILE_NAME}] [--output dist/${SANDBOX_TEMPLATE_BUILD_PLAN_FILE_NAME}]`);
+  console.log(`  openpond sandbox-template run [--file ${OPENPOND_MANIFEST_FILE_NAME}|--build dist/${SANDBOX_TEMPLATE_BUILD_PLAN_FILE_NAME}] [--target <name>|--action <name>|--service <name>]`);
+  console.log(`  openpond sandbox-template dev [--file ${OPENPOND_MANIFEST_FILE_NAME}|--build dist/${SANDBOX_TEMPLATE_BUILD_PLAN_FILE_NAME}] [--service <name>]`);
   console.log(
-    `  openpond sandbox-template start [--file ${OPENPOND_MANIFEST_FILE_NAME}] [--input-file name=path] [--input-files name=glob] [--action <name>|--service <name>] [--commit] [--no-push]`,
+    `  openpond sandbox-template start [--file ${OPENPOND_MANIFEST_FILE_NAME}] [--env-ref NAME=openpond://secret/...] [--input-file name=path] [--input-files name=glob] [--target <name>|--action <name>|--service <name>] [--commit] [--no-push]`,
   );
+  console.log(`  openpond sandbox-template action <sandboxId> <actionName> [--file ${OPENPOND_MANIFEST_FILE_NAME}]`);
   console.log(
     "  openpond repo create --name <name> [--team-id <id>] [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--env <json>] [--empty|--opentool] [--token] [--auto-schedule-migration <true|false>]",
   );
@@ -1733,6 +2450,12 @@ function printHelp(): void {
   console.log("  openpond organizations mcp-authorize <slug> [--origin <url>] [--scope <csv|space>] [--tool <name>] [--arguments <json>] [--open]");
   console.log("  openpond sandbox list [--env staging] [--sandbox-api-url <url>]");
   console.log("  openpond sandbox mcp-config [--env staging] [--sandbox-api-url <url>]");
+  console.log("  openpond sandbox secrets [--team-id <id>] [--json]");
+  console.log("  openpond sandbox secret-create --name <ENV_NAME> [--team-id <id>] [--stdin]");
+  console.log("  openpond sandbox secret-rotate <secretId> [--team-id <id>] [--stdin]");
+  console.log("  openpond sandbox secret-revoke <secretId> [--team-id <id>]");
+  console.log("  openpond sandbox secret-delete <secretId> [--team-id <id>]");
+  console.log("  openpond sandbox secret-attach <secretId> --env-name <ENV_NAME> --target-type sandbox|template|app|replay --target-id <id>");
   console.log("  openpond sandbox snapshots [--team-id <id>] [--app-id <id>]");
   console.log("  openpond sandbox templates [--team-id <id>] [--app-id <id>] [--query <text>] [--name <name>] [--use-case <id>]");
   console.log("  openpond sandbox template-builds --team-id <id>");
@@ -1759,7 +2482,7 @@ function printHelp(): void {
   );
   console.log("  openpond sandbox snapshot-publish <sandboxId> <snapshotId>");
   console.log(
-    "  openpond sandbox create [--repo <url>] [--budget-usd 0.05] [--cpu 1] [--memory-gb 1] [--disk-gb 8] [--integration-connection <id>] [--integration-capabilities <csv>]",
+    "  openpond sandbox create [--repo <url>] [--budget-usd 0.05] [--env-ref NAME=openpond://secret/...] [--env-literal NAME=value]",
   );
   console.log('  openpond sandbox exec <sandboxId> --command "bun test"');
   console.log(
@@ -3840,6 +4563,7 @@ function buildSandboxCreateInput(options: Record<string, string | boolean>): San
   const integrationScopes = parseCsvOption(options.integrationScopes);
   const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
   const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+  const env = parseSandboxEnvOptions(options);
 
   if (integrationConnection && integrationCapabilities.length === 0) {
     throw new Error("integration-capabilities is required with integration-connection");
@@ -3861,6 +4585,7 @@ function buildSandboxCreateInput(options: Record<string, string | boolean>): San
       ...(maxDurationSeconds !== undefined ? { maxDurationSeconds } : {}),
       ...(idleTimeoutSeconds !== undefined ? { idleTimeoutSeconds } : {}),
     },
+    ...(env.length > 0 ? { env } : {}),
     ...(volumeName || volumeMountPath || volumeStorageGb !== undefined
       ? {
           volumes: [
@@ -4448,6 +5173,117 @@ async function runSandboxCommand(
         2,
       ),
     );
+    return;
+  }
+
+  if (subcommand === "secrets" || subcommand === "secret-list") {
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const secrets = await client.listSecrets({
+      ...(teamId ? { teamId } : {}),
+      ...(appId ? { appId } : {}),
+    });
+    if (parseBooleanOption(options.json)) {
+      console.log(
+        JSON.stringify({ secrets: secrets.map(summarizeSandboxSecret) }, null, 2),
+      );
+      return;
+    }
+    if (secrets.length === 0) {
+      console.log("no sandbox secrets found");
+      return;
+    }
+    for (const secret of secrets) {
+      console.log(
+        `${secret.name}\t${secret.status}\tv${secret.currentVersion ?? "current"}\t${secret.secretRef}`,
+      );
+    }
+    return;
+  }
+
+  if (subcommand === "secret-create") {
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const name = typeof options.name === "string" ? options.name.trim() : "";
+    const description =
+      typeof options.description === "string" && options.description.trim()
+        ? options.description.trim()
+        : undefined;
+    const scope =
+      options.scope === "app" || options.scope === "template" || options.scope === "team"
+        ? options.scope
+        : undefined;
+    if (!name) {
+      throw new Error("usage: sandbox secret-create --name <ENV_NAME> [--team-id <id>] [--stdin]");
+    }
+    const value = await readSandboxSecretValue(options, `Value for ${name}`);
+    const secret = await client.createSecret({
+      ...(teamId ? { teamId } : {}),
+      name,
+      value,
+      ...(description ? { description } : {}),
+      ...(scope ? { scope } : {}),
+    });
+    console.log(JSON.stringify({ secret: summarizeSandboxSecret(secret) }, null, 2));
+    return;
+  }
+
+  if (subcommand === "secret-rotate") {
+    const secretId = rest[1];
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    if (!secretId) {
+      throw new Error("usage: sandbox secret-rotate <secretId> [--team-id <id>] [--stdin]");
+    }
+    const value = await readSandboxSecretValue(options, "New secret value");
+    const secret = await client.rotateSecret(secretId, {
+      ...(teamId ? { teamId } : {}),
+      value,
+    });
+    console.log(JSON.stringify({ secret: summarizeSandboxSecret(secret) }, null, 2));
+    return;
+  }
+
+  if (subcommand === "secret-attach") {
+    const secretId = rest[1];
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const envName = typeof options.envName === "string" ? options.envName.trim() : "";
+    const targetType =
+      options.targetType === "sandbox" ||
+      options.targetType === "template" ||
+      options.targetType === "app" ||
+      options.targetType === "replay"
+        ? options.targetType
+        : undefined;
+    const targetId = typeof options.targetId === "string" ? options.targetId.trim() : "";
+    if (!secretId || !envName || !targetType || !targetId) {
+      throw new Error(
+        "usage: sandbox secret-attach <secretId> --env-name <ENV_NAME> --target-type sandbox|template|app|replay --target-id <id>",
+      );
+    }
+    const secret = await client.attachSecret(secretId, {
+      ...(teamId ? { teamId } : {}),
+      envName,
+      targetType,
+      targetId,
+    });
+    console.log(JSON.stringify({ secret: summarizeSandboxSecret(secret) }, null, 2));
+    return;
+  }
+
+  if (subcommand === "secret-revoke" || subcommand === "secret-delete") {
+    const secretId = rest[1];
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    if (!secretId) {
+      throw new Error(`usage: sandbox ${subcommand} <secretId> [--team-id <id>]`);
+    }
+    const secret =
+      subcommand === "secret-revoke"
+        ? await client.revokeSecret(secretId, {
+            ...(teamId ? { teamId } : {}),
+          })
+        : await client.deleteSecret(secretId, {
+            ...(teamId ? { teamId } : {}),
+          });
+    console.log(JSON.stringify({ secret: summarizeSandboxSecret(secret) }, null, 2));
     return;
   }
 
@@ -5759,7 +6595,7 @@ async function runSandboxCommand(
   }
 
   throw new Error(
-    "usage: sandbox <list|mcp-config|snapshots|templates|template-launch|snapshot-fork|snapshot-validate|snapshot-publish|create|exec|port|preview|stop|delete|receipts|logs|billing|process-start|process-list|process-get|process-stop|process-stream|pty-start|pty-list|pty-get|pty-write|pty-stop|pty-stream|upload-file|download-file|list-files|search-files|delete-file|stat-file|mkdir|move-file|git-status|git-diff|git-branch|git-commit|git-pull|git-push|smoke> [args]",
+    "usage: sandbox <list|mcp-config|secrets|secret-create|secret-rotate|secret-attach|secret-revoke|secret-delete|snapshots|templates|template-launch|snapshot-fork|snapshot-validate|snapshot-publish|create|exec|port|preview|stop|delete|receipts|logs|billing|process-start|process-list|process-get|process-stop|process-stream|pty-start|pty-list|pty-get|pty-write|pty-stop|pty-stream|upload-file|download-file|list-files|search-files|delete-file|stat-file|mkdir|move-file|git-status|git-diff|git-branch|git-commit|git-pull|git-push|smoke> [args]",
   );
 }
 

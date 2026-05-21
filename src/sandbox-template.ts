@@ -4,6 +4,8 @@ import { z } from "zod";
 export const SANDBOX_TEMPLATE_PREVIEW_PORT_MIN = 3000;
 export const SANDBOX_TEMPLATE_PREVIEW_PORT_MAX = 9999;
 export const OPENPOND_MANIFEST_FILE_NAME = "openpond.yaml";
+export const SANDBOX_TEMPLATE_BUILD_PLAN_FILE_NAME = "openpond-template-plan.json";
+export const SANDBOX_TEMPLATE_BUILD_PLAN_KIND = "openpond.sandboxTemplate.buildPlan.v1";
 
 const INTEGRATION_PROVIDERS = [
   "google",
@@ -103,6 +105,30 @@ const SandboxTemplateNamedCommandSchema = SandboxTemplateCommandSchema.extend({
   name: z.string().trim().min(1).max(80),
 }).strict();
 
+const SandboxTemplateMcpEndpointSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    service: z.string().trim().min(1).max(80).optional(),
+    port: z
+      .number()
+      .int()
+      .min(SANDBOX_TEMPLATE_PREVIEW_PORT_MIN)
+      .max(SANDBOX_TEMPLATE_PREVIEW_PORT_MAX)
+      .refine((port) => !RESERVED_PREVIEW_PORTS.has(port), {
+        message: "app MCP port is reserved",
+      }),
+    path: z
+      .string()
+      .trim()
+      .min(1)
+      .max(512)
+      .refine((value) => value.startsWith("/"), {
+        message: "app MCP path must start with /",
+      })
+      .default("/mcp"),
+  })
+  .strict();
+
 const SandboxTemplateValidationProbeSchema = z
   .object({
     name: z.string().trim().min(1).max(80).optional(),
@@ -130,6 +156,19 @@ const SandboxTemplateValidationProbeSchema = z
 const SandboxTemplateJsonSchema = z
   .record(z.string(), z.unknown())
   .refine((schema) => schema.type === "object", "input schema must be a JSON schema object");
+
+const SandboxTemplateEnvInputSchema = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
+      .max(191),
+    required: z.boolean().default(false),
+    secret: z.boolean().default(true),
+    description: z.string().trim().max(500).optional(),
+  })
+  .strict();
 
 export const SandboxTemplateManifestSchema = z
   .object({
@@ -160,6 +199,12 @@ export const SandboxTemplateManifestSchema = z
     start: SandboxTemplateCommandSchema,
     actions: z.array(SandboxTemplateNamedCommandSchema).max(20).default([]),
     services: z.array(SandboxTemplateNamedCommandSchema).max(20).default([]),
+    mcp: z
+      .object({
+        endpoints: z.array(SandboxTemplateMcpEndpointSchema).max(10).default([]),
+      })
+      .strict()
+      .default({ endpoints: [] }),
     volumes: z.array(SandboxTemplateVolumeSchema).max(5).default([]),
     integrations: z
       .object({
@@ -170,9 +215,10 @@ export const SandboxTemplateManifestSchema = z
     inputs: z
       .object({
         schema: SandboxTemplateJsonSchema.default({ type: "object" }),
+        env: z.array(SandboxTemplateEnvInputSchema).max(100).default([]),
       })
       .strict()
-      .default({ schema: { type: "object" } }),
+      .default({ schema: { type: "object" }, env: [] }),
     artifacts: z
       .object({
         paths: z.array(RelativeWorkspacePathSchema).max(100).default([]),
@@ -196,6 +242,8 @@ export const SandboxTemplateManifestSchema = z
       "volumes",
     );
     validateInputSchemaUploadTargets(manifest, context);
+    validateEnvInputs(manifest, context);
+    validateMcpEndpoints(manifest, context);
   });
 
 export type SandboxTemplateManifest = z.infer<typeof SandboxTemplateManifestSchema>;
@@ -207,6 +255,16 @@ export type SandboxTemplateExecutableKind = "start" | "action" | "service";
 export type SandboxTemplateExecutable = SandboxTemplateCommand & {
   kind: SandboxTemplateExecutableKind;
   name: string;
+};
+
+export type SandboxTemplateBuildPlan = {
+  kind: typeof SANDBOX_TEMPLATE_BUILD_PLAN_KIND;
+  schemaVersion: 1;
+  manifestFile: string;
+  projectRoot: string;
+  manifest: SandboxTemplateManifest;
+  metadata: Record<string, unknown>;
+  executables: SandboxTemplateExecutable[];
 };
 
 export type SandboxTemplateValidationDiagnostic = {
@@ -372,10 +430,32 @@ export function sandboxTemplateBuildMetadata(manifest: SandboxTemplateManifest):
         label: port.label ?? null,
       })),
     ),
+    appMcpEndpoints: manifest.mcp.endpoints.map((endpoint) => ({
+      name: endpoint.name ?? null,
+      service: endpoint.service ?? null,
+      port: endpoint.port,
+      path: endpoint.path,
+    })),
     validation: {
       commands: manifest.validation.commands,
       probes: manifest.validation.probes,
     },
+  };
+}
+
+export function sandboxTemplateBuildPlan(input: {
+  manifest: SandboxTemplateManifest;
+  manifestFile: string;
+  projectRoot: string;
+}): SandboxTemplateBuildPlan {
+  return {
+    kind: SANDBOX_TEMPLATE_BUILD_PLAN_KIND,
+    schemaVersion: 1,
+    manifestFile: input.manifestFile,
+    projectRoot: input.projectRoot,
+    manifest: input.manifest,
+    metadata: sandboxTemplateBuildMetadata(input.manifest),
+    executables: sandboxTemplateExecutableEntries(input.manifest),
   };
 }
 
@@ -455,6 +535,11 @@ export function sandboxTemplateScaffoldFiles(
       "        path: /",
       "    artifactPaths: []",
       "inputs:",
+      "  env:",
+      "    - name: FOO_API_KEY",
+      "      required: false",
+      "      secret: true",
+      "      description: API key used by the sample action.",
       "  schema:",
       "    type: object",
       "    properties:",
@@ -581,6 +666,70 @@ function validateInputSchemaUploadTargets(
         code: z.ZodIssueCode.custom,
         path: ["inputs", "schema", "properties", inputName, "x-openpond-upload", "targetPath"],
         message: "upload target references an undeclared volume",
+      });
+    }
+  }
+}
+
+function validateEnvInputs(
+  manifest: {
+    inputs: { env: Array<{ name: string }> };
+  },
+  context: z.RefinementCtx,
+): void {
+  addDuplicateNameIssue(
+    context,
+    manifest.inputs.env.map((env) => env.name),
+    "env input names must be unique",
+    "inputs",
+  );
+}
+
+function validateMcpEndpoints(
+  manifest: {
+    services: Array<{ name: string; ports: Array<{ port: number }> }>;
+    start: { ports: Array<{ port: number }> };
+    mcp: { endpoints: Array<{ service?: string; port: number }> };
+  },
+  context: z.RefinementCtx,
+): void {
+  const servicePorts = new Map(
+    manifest.services.map((service) => [
+      service.name,
+      new Set(service.ports.map((port) => port.port)),
+    ]),
+  );
+  const declaredPorts = new Set([
+    ...manifest.start.ports.map((port) => port.port),
+    ...manifest.services.flatMap((service) =>
+      service.ports.map((port) => port.port),
+    ),
+  ]);
+  for (const [index, endpoint] of manifest.mcp.endpoints.entries()) {
+    if (endpoint.service) {
+      const ports = servicePorts.get(endpoint.service);
+      if (!ports) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["mcp", "endpoints", index, "service"],
+          message: `app MCP service does not exist: ${endpoint.service}`,
+        });
+        continue;
+      }
+      if (!ports.has(endpoint.port)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["mcp", "endpoints", index, "port"],
+          message: `app MCP port ${endpoint.port} is not declared on service ${endpoint.service}`,
+        });
+      }
+      continue;
+    }
+    if (!declaredPorts.has(endpoint.port)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["mcp", "endpoints", index, "port"],
+        message: `app MCP port ${endpoint.port} is not declared on start or services`,
       });
     }
   }
