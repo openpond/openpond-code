@@ -371,10 +371,12 @@ export const SandboxTemplateManifestSchema = z
   });
 
 export type SandboxTemplateManifest = z.infer<typeof SandboxTemplateManifestSchema>;
+export type SandboxTemplateResources = NonNullable<SandboxTemplateManifest["resources"]>;
 export type SandboxTemplatePort = SandboxTemplateManifest["start"]["ports"][number];
 export type SandboxTemplateCommand = SandboxTemplateManifest["start"];
 export type SandboxTemplateNamedCommand = SandboxTemplateManifest["actions"][number];
 export type SandboxTemplateSchedule = SandboxTemplateManifest["schedules"][number];
+export type SandboxTemplateVolume = SandboxTemplateManifest["volumes"][number];
 export type SandboxTemplateExecutableKind = "start" | "action" | "service";
 
 export type SandboxTemplateExecutable = SandboxTemplateCommand & {
@@ -493,6 +495,102 @@ export function formatSandboxTemplateDiagnostics(
 
 export function defineSandboxTemplate<T extends SandboxTemplateManifest>(template: T): T {
   return SandboxTemplateManifestSchema.parse(template) as T;
+}
+
+export function sandboxTemplateResources(
+  resources: Partial<SandboxTemplateResources> = {},
+): SandboxTemplateResources {
+  return SandboxTemplateResourcesSchema.parse(resources);
+}
+
+export function sandboxTemplateDurableVolume(
+  volume: SandboxTemplateVolume,
+): SandboxTemplateVolume {
+  return SandboxTemplateVolumeSchema.parse({
+    ...volume,
+    deleteOnSandboxDelete: volume.deleteOnSandboxDelete ?? false,
+  });
+}
+
+export function sandboxTemplatePreviewPort(
+  port: number,
+  options: Omit<Partial<SandboxTemplatePort>, "port"> = {},
+): SandboxTemplatePort {
+  return SandboxTemplatePortSchema.parse({
+    ...options,
+    port,
+  });
+}
+
+export type SandboxTemplateFileInputOptions = {
+  targetPath: string;
+  title?: string;
+  description?: string;
+  accept?: string[];
+  multiple?: boolean;
+};
+
+export type SandboxTemplateFileInputSchema =
+  | {
+      type: "string";
+      format: "file";
+      title?: string;
+      description?: string;
+      "x-openpond-upload": {
+        targetPath: string;
+        accept?: string[];
+        multiple?: false;
+      };
+    }
+  | {
+      type: "array";
+      title?: string;
+      description?: string;
+      items: {
+        type: "string";
+        format: "file";
+      };
+      "x-openpond-upload": {
+        targetPath: string;
+        accept?: string[];
+        multiple: true;
+      };
+    };
+
+export function sandboxTemplateFileInput(
+  options: SandboxTemplateFileInputOptions,
+): SandboxTemplateFileInputSchema {
+  const targetPath = RelativeWorkspacePathSchema.parse(options.targetPath);
+  const accept = options.accept
+    ?.map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  const upload = {
+    targetPath,
+    ...(accept && accept.length > 0 ? { accept } : {}),
+  };
+  const base = {
+    ...(options.title?.trim() ? { title: options.title.trim() } : {}),
+    ...(options.description?.trim()
+      ? { description: options.description.trim() }
+      : {}),
+    "x-openpond-upload": upload,
+  };
+  if (options.multiple) {
+    return {
+      ...base,
+      "x-openpond-upload": {
+        ...upload,
+        multiple: true,
+      },
+      type: "array",
+      items: { type: "string", format: "file" },
+    };
+  }
+  return {
+    ...base,
+    type: "string",
+    format: "file",
+  };
 }
 
 export function sandboxTemplateExecutableEntries(
