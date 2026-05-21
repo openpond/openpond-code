@@ -1013,6 +1013,176 @@ export type SandboxTemplateCatalogResponse = {
   templates: SandboxTemplateCatalogEntry[];
 };
 
+export type AgentWorkspaceMode =
+  | "readonly"
+  | "attempt"
+  | "feature"
+  | "rollout"
+  | "replay"
+  | "template_build"
+  | "scheduled_run"
+  | "patch_only"
+  | "hotfix"
+  | "multi_feature_batch";
+
+export type AgentWorkspaceStatus =
+  | "created"
+  | "materializing"
+  | "running"
+  | "paused"
+  | "checkpointed"
+  | "ready_for_review"
+  | "promoting"
+  | "promoted"
+  | "archived"
+  | "failed"
+  | "expired";
+
+export type AgentWorkspacePromotionPolicy =
+  | "none"
+  | "manual"
+  | "auto_after_checks";
+
+export type AgentWorkspaceActorType = "agent" | "user" | "service" | "schedule";
+
+export type AgentWorkspacePermissions = {
+  git: {
+    read: boolean;
+    writeWorkspaceRef: boolean;
+    promote: boolean;
+  };
+  snapshots: {
+    create: boolean;
+    restore: boolean;
+    checkpoint: boolean;
+  };
+  artifacts: {
+    read: boolean;
+    write: boolean;
+  };
+  sandbox: {
+    exec: boolean;
+    lifecycle: boolean;
+  };
+};
+
+export type AgentWorkspace = {
+  id: string;
+  teamId: string;
+  ownerUserId: string;
+  createdByUserId: string;
+  appId: string | null;
+  mode: AgentWorkspaceMode;
+  status: AgentWorkspaceStatus;
+  repoId: string | null;
+  baseBranch: string;
+  baseSha: string | null;
+  workspaceRef: string | null;
+  currentSha: string | null;
+  sandboxId: string | null;
+  rootfsSnapshotId: string | null;
+  dependencySnapshotId: string | null;
+  checkpointSnapshotIds: string[];
+  artifactRefs: string[];
+  promotionPolicy: AgentWorkspacePromotionPolicy;
+  permissions: AgentWorkspacePermissions;
+  version: number;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string | null;
+  archivedAt: string | null;
+};
+
+export type AgentWorkspaceEvent = {
+  id: string;
+  workspaceId: string;
+  teamId: string;
+  sequence: number;
+  actorType: AgentWorkspaceActorType;
+  actorId: string;
+  type: string;
+  summary: string | null;
+  payload: Record<string, unknown>;
+  payloadHash: string;
+  payloadStorageKey: string | null;
+  prevEventHash: string | null;
+  eventHash: string;
+  stateHash: string | null;
+  commitSha: string | null;
+  snapshotId: string | null;
+  logRef: string | null;
+  artifactRefs: string[];
+  createdAt: string;
+};
+
+export type AgentWorkspaceCreateInput = {
+  teamId?: string;
+  appId?: string;
+  mode?: AgentWorkspaceMode;
+  baseBranch?: string;
+  baseSha?: string;
+  sandboxId?: string;
+  rootfsSnapshotId?: string;
+  dependencySnapshotId?: string;
+  promotionPolicy?: AgentWorkspacePromotionPolicy;
+  metadata?: Record<string, unknown>;
+};
+
+export type AgentWorkspaceEventInput = {
+  type: string;
+  summary?: string | null;
+  payload?: Record<string, unknown>;
+  commitSha?: string | null;
+  snapshotId?: string | null;
+  logRef?: string | null;
+  artifactRefs?: string[];
+};
+
+export type AgentWorkspaceCheckpointInput = {
+  name?: string;
+  rootfsSnapshotId?: string;
+  dependencySnapshotId?: string;
+  artifactRefs?: string[];
+  metadata?: Record<string, unknown>;
+};
+
+export type AgentWorkspacePromoteInput = {
+  expectedTargetSha: string;
+  validationState?: "pending" | "passed";
+  summary?: string;
+};
+
+export type AgentWorkspaceTransitionInput = {
+  status: AgentWorkspaceStatus;
+  expectedVersion: number;
+  summary?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type AgentWorkspaceListResponse = {
+  workspaces: AgentWorkspace[];
+};
+
+export type AgentWorkspaceResponse = {
+  workspace: AgentWorkspace;
+};
+
+export type AgentWorkspaceEventResponse = {
+  workspace: AgentWorkspace;
+  event: AgentWorkspaceEvent;
+};
+
+export type AgentWorkspaceEventsResponse = {
+  workspaceId: string;
+  events: AgentWorkspaceEvent[];
+};
+
+export type AgentWorkspacePromoteResponse = {
+  workspace: AgentWorkspace;
+  promotedSha: string;
+};
+
 export type SandboxIntegrationConnectionsResponse = {
   teamId: string;
   connections: SandboxIntegrationConnection[];
@@ -1372,6 +1542,29 @@ export type OpenPondSandboxMcpServerConfig = {
   headers: Record<string, string>;
 };
 
+export type OpenPondAgentWorkspaceHandle = {
+  id: string;
+  initial: AgentWorkspace | null;
+  get(): Promise<AgentWorkspace>;
+  status(
+    input: AgentWorkspaceTransitionInput | AgentWorkspace["status"],
+  ): Promise<AgentWorkspace>;
+  events(): Promise<AgentWorkspaceEventsResponse>;
+  event(input: AgentWorkspaceEventInput): Promise<AgentWorkspaceEventResponse>;
+  recordCommit(
+    commitSha: string,
+    input?: Omit<AgentWorkspaceEventInput, "commitSha" | "type"> & {
+      type?: string;
+    },
+  ): Promise<AgentWorkspaceEventResponse>;
+  checkpoint(input: AgentWorkspaceCheckpointInput): Promise<AgentWorkspace>;
+  promote(
+    input: AgentWorkspacePromoteInput,
+    options?: { teamId?: string },
+  ): Promise<AgentWorkspacePromoteResponse>;
+  archive(expectedVersion?: number): Promise<AgentWorkspace>;
+};
+
 export class OpenPondSandboxClient {
   private readonly apiKey: string;
   private readonly apiRootUrl: string;
@@ -1516,6 +1709,147 @@ export class OpenPondSandboxClient {
     if (input.limit) query.set("limit", String(input.limit));
     return this.request<SandboxSnapshotCatalogResponse>(
       `/catalog/snapshots${query.size > 0 ? `?${query.toString()}` : ""}`,
+    );
+  }
+
+  listAgentWorkspaces(input: {
+    teamId?: string;
+    appId?: string;
+  } = {}): Promise<AgentWorkspace[]> {
+    const query = new URLSearchParams();
+    if (input.teamId) query.set("teamId", input.teamId);
+    if (input.appId) query.set("appId", input.appId);
+    return this.requestApiRoot<AgentWorkspaceListResponse>(
+      `/agent-workspaces${query.size > 0 ? `?${query.toString()}` : ""}`,
+    ).then((payload) => payload.workspaces);
+  }
+
+  createAgentWorkspace(input: AgentWorkspaceCreateInput): Promise<AgentWorkspace> {
+    return this.requestApiRoot<AgentWorkspaceResponse>("/agent-workspaces", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((payload) => payload.workspace);
+  }
+
+  createAppAgentWorkspace(
+    appId: string,
+    input: Omit<AgentWorkspaceCreateInput, "appId"> = {},
+  ): Promise<OpenPondAgentWorkspaceHandle> {
+    return this.createAgentWorkspace({
+      ...input,
+      appId,
+    }).then((workspace) => this.agentWorkspace(workspace.id, workspace));
+  }
+
+  agentWorkspace(
+    workspaceId: string,
+    initial: AgentWorkspace | null = null,
+  ): OpenPondAgentWorkspaceHandle {
+    return {
+      id: workspaceId,
+      initial,
+      get: () => this.getAgentWorkspace(workspaceId),
+      status: async (input) => {
+        if (typeof input !== "string") {
+          return this.updateAgentWorkspaceStatus(workspaceId, input);
+        }
+        const current = await this.getAgentWorkspace(workspaceId);
+        return this.updateAgentWorkspaceStatus(workspaceId, {
+          status: input,
+          expectedVersion: current.version,
+        });
+      },
+      events: () => this.listAgentWorkspaceEvents(workspaceId),
+      event: (input) => this.emitAgentWorkspaceEvent(workspaceId, input),
+      recordCommit: (commitSha, input = {}) =>
+        this.emitAgentWorkspaceEvent(workspaceId, {
+          ...input,
+          type: input.type ?? "git.commit",
+          commitSha,
+        }),
+      checkpoint: (input) => this.checkpointAgentWorkspace(workspaceId, input),
+      promote: (input, options = {}) =>
+        this.promoteAgentWorkspace(workspaceId, input, options),
+      archive: async (expectedVersion) => {
+        const version =
+          expectedVersion ??
+          (await this.getAgentWorkspace(workspaceId)).version;
+        return this.updateAgentWorkspaceStatus(workspaceId, {
+          status: "archived",
+          expectedVersion: version,
+        });
+      },
+    };
+  }
+
+  getAgentWorkspace(workspaceId: string): Promise<AgentWorkspace> {
+    return this.requestApiRoot<AgentWorkspaceResponse>(
+      `/agent-workspaces/${encodeURIComponent(workspaceId)}`,
+    ).then((payload) => payload.workspace);
+  }
+
+  updateAgentWorkspaceStatus(
+    workspaceId: string,
+    input: AgentWorkspaceTransitionInput,
+  ): Promise<AgentWorkspace> {
+    return this.requestApiRoot<AgentWorkspaceResponse>(
+      `/agent-workspaces/${encodeURIComponent(workspaceId)}/status`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      },
+    ).then((payload) => payload.workspace);
+  }
+
+  listAgentWorkspaceEvents(
+    workspaceId: string,
+  ): Promise<AgentWorkspaceEventsResponse> {
+    return this.requestApiRoot<AgentWorkspaceEventsResponse>(
+      `/agent-workspaces/${encodeURIComponent(workspaceId)}/events`,
+    );
+  }
+
+  emitAgentWorkspaceEvent(
+    workspaceId: string,
+    input: AgentWorkspaceEventInput,
+  ): Promise<AgentWorkspaceEventResponse> {
+    return this.requestApiRoot<AgentWorkspaceEventResponse>(
+      `/agent-workspaces/${encodeURIComponent(workspaceId)}/events`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    );
+  }
+
+  checkpointAgentWorkspace(
+    workspaceId: string,
+    input: AgentWorkspaceCheckpointInput,
+  ): Promise<AgentWorkspace> {
+    return this.requestApiRoot<AgentWorkspaceResponse>(
+      `/agent-workspaces/${encodeURIComponent(workspaceId)}/checkpoints`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    ).then((payload) => payload.workspace);
+  }
+
+  promoteAgentWorkspace(
+    workspaceId: string,
+    input: AgentWorkspacePromoteInput,
+    options: { teamId?: string } = {},
+  ): Promise<AgentWorkspacePromoteResponse> {
+    const query = new URLSearchParams();
+    if (options.teamId) query.set("teamId", options.teamId);
+    return this.requestApiRoot<AgentWorkspacePromoteResponse>(
+      `/agent-workspaces/${encodeURIComponent(workspaceId)}/promote${
+        query.size > 0 ? `?${query.toString()}` : ""
+      }`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
     );
   }
 
