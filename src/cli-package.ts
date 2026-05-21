@@ -2417,10 +2417,11 @@ function parseKeyValueOption(value: string, label: string): [string, string] {
 function collectSandboxTemplateUploadSpecs(
   manifest: SandboxTemplateManifest,
 ): Map<string, SandboxTemplateUploadSpec> {
-  const properties = asPlainRecord(manifest.inputs.schema.properties);
+  const properties = asPlainRecord(manifest.inputs.schema.properties) ?? {};
   const specs = new Map<string, SandboxTemplateUploadSpec>();
   for (const [inputName, rawProperty] of Object.entries(properties)) {
     const property = asPlainRecord(rawProperty);
+    if (!property) continue;
     const upload = asPlainRecord(
       property["x-openpond-upload"] ?? property.xOpenPondUpload,
     );

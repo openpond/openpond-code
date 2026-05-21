@@ -340,6 +340,82 @@ describe("sandbox secret CLI output redaction", () => {
       await rm(projectDir, { recursive: true, force: true });
     }
   });
+
+  test("sandbox template start accepts input object schemas without properties", async () => {
+    const requests: CapturedRequest[] = [];
+    await withSandboxApi(requests, async (sandboxApiUrl) => {
+      const projectDir = await mkdtemp(path.join(os.tmpdir(), "openpond-cli-empty-inputs-"));
+      try {
+        await writeFile(
+          path.join(projectDir, "openpond.yaml"),
+          [
+            "schemaVersion: 1",
+            "name: empty-input-start",
+            "version: 0.0.1",
+            "useCase: sandbox-template-example",
+            "description: Empty input schema start test.",
+            "runtime:",
+            "  base: node-bun-workspace",
+            "resources:",
+            "  cpu: 1",
+            "  memoryGb: 1",
+            "  diskGb: 4",
+            "start:",
+            "  command: echo scheduled",
+            "actions: []",
+            "services: []",
+            "validation:",
+            "  commands:",
+            "    - test -f openpond.yaml",
+            "inputs:",
+            "  schema:",
+            "    type: object",
+            "schedules:",
+            "  - name: daily-start",
+            "    rate: 1 day",
+            "    target:",
+            "      kind: start",
+            "",
+          ].join("\n"),
+          "utf8",
+        );
+
+        const result = await runCli(
+          [
+            "sandbox-template",
+            "start",
+            "--repo",
+            "https://github.com/octocat/Hello-World",
+            "--enable-schedules",
+            "daily-start",
+            "--sandbox-api-url",
+            sandboxApiUrl,
+          ],
+          "",
+          { cwd: projectDir },
+        );
+
+        expect(result.code).toBe(0);
+        const scheduleRequest = requests.find(
+          (request) =>
+            request.method === "POST" &&
+            request.url === "/v1/sandboxes/schedules",
+        );
+        expect(scheduleRequest?.body).toMatchObject({
+          sourceSandboxId: "sandbox_test",
+          name: "daily-start",
+          scheduleType: "rate",
+          scheduleExpression: "rate(1 day)",
+          target: {
+            kind: "command",
+            command: "echo scheduled",
+          },
+        });
+      } finally {
+        await rm(projectDir, { recursive: true, force: true });
+      }
+    });
+  });
 });
 
 async function withSandboxApi(
@@ -448,6 +524,53 @@ async function withSandboxApi(
       return;
     }
 
+    if (request.url === "/v1/sandboxes/sandbox_test/exec" && request.method === "POST") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          sandbox: sandboxRecord(),
+          command: sandboxCommandRecord(String(body.command ?? "true")),
+        }),
+      );
+      return;
+    }
+
+    if (request.url === "/v1/sandboxes/sandbox_test/files" && request.method === "POST") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          sandbox: sandboxRecord(),
+          file: {
+            path: body.path,
+            sizeBytes: String(body.contentsBase64 ?? "").length,
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        }),
+      );
+      return;
+    }
+
+    if (request.url === "/v1/sandboxes/sandbox_test/processes" && request.method === "POST") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          sandbox: sandboxRecord(),
+          process: sandboxProcessRecord(String(body.command ?? "echo ok")),
+        }),
+      );
+      return;
+    }
+
+    if (request.url === "/v1/sandboxes/schedules" && request.method === "POST") {
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          schedule: sandboxScheduleRecord(body),
+        }),
+      );
+      return;
+    }
+
     response.writeHead(404, { "content-type": "application/json" });
     response.end(JSON.stringify({ error: "not_found" }));
   });
@@ -513,14 +636,109 @@ function sandboxRecord(): Record<string, unknown> {
     state: "running",
     runtimeDriver: "remote-firecracker",
     repo: null,
+    teamId: "team_test",
+    appId: null,
+    visibility: "private",
+    ownerUserId: "user_test",
+    billingAccountId: "billing_test",
+    resources: { cpu: 1, memoryGb: 1, diskGb: 4 },
     budget: { maxUsd: "0.05" },
+    quotas: {},
     reservation: {
       capturedUsd: "0",
       mpp: null,
     },
+    commands: [],
     integrationLeases: [],
     previewPorts: [],
+    snapshots: [],
+    archive: null,
     receipts: [],
+    logs: [],
+    metadata: {},
+    createdAt: "2026-05-20T00:00:00.000Z",
+    updatedAt: "2026-05-20T00:00:00.000Z",
+    startedAt: "2026-05-20T00:00:00.000Z",
+    stoppedAt: null,
+    deletedAt: null,
+  };
+}
+
+function sandboxCommandRecord(command: string): Record<string, unknown> {
+  return {
+    id: "command_test",
+    command,
+    status: "succeeded",
+    output: "",
+    exitCode: 0,
+    startedAt: "2026-05-20T00:00:00.000Z",
+    completedAt: "2026-05-20T00:00:01.000Z",
+  };
+}
+
+function sandboxProcessRecord(command: string): Record<string, unknown> {
+  return {
+    id: "process_test",
+    command,
+    status: "succeeded",
+    output: "",
+    exitCode: 0,
+    startedAt: "2026-05-20T00:00:00.000Z",
+    completedAt: "2026-05-20T00:00:01.000Z",
+    durationMs: 1000,
+    outputBytes: 0,
+  };
+}
+
+function sandboxScheduleRecord(input: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: "schedule_test",
+    teamId: "team_test",
+    ownerUserId: "user_test",
+    createdByUserId: "user_test",
+    name: input.name,
+    description: input.description ?? null,
+    scheduleType: input.scheduleType,
+    scheduleExpression: input.scheduleExpression,
+    enabled: input.enabled ?? true,
+    timezone: input.timezone ?? null,
+    startAt: input.startAt ?? null,
+    endAt: input.endAt ?? null,
+    maxRuns: input.maxRuns ?? null,
+    executionCount: 0,
+    lifecycleStatus: "active",
+    lifecycleReason: null,
+    runtimePolicy: input.runtimePolicy ?? "run_and_stop",
+    sourceSandboxId: input.sourceSandboxId ?? null,
+    snapshotId: input.snapshotId ?? null,
+    templateId: input.templateId ?? null,
+    target: input.target ?? {
+      kind: "command",
+      actionName: null,
+      command: null,
+      requiresStart: false,
+    },
+    budget: input.budget ?? null,
+    resources: input.resources ?? null,
+    quotas: input.quotas ?? null,
+    lifecycle: input.lifecycle ?? null,
+    retentionPolicy: input.retentionPolicy ?? null,
+    env: input.env ?? [],
+    integrationLeases: input.integrationLeases ?? [],
+    metadata: input.metadata ?? {},
+    managementSource: input.managementSource ?? "api",
+    manifestPath: input.manifestPath ?? null,
+    awsScheduleProvider: null,
+    awsScheduleName: null,
+    awsScheduleArn: null,
+    syncStatus: "pending",
+    syncError: null,
+    syncRequestedAt: null,
+    lastSyncedAt: null,
+    lastRunAt: null,
+    lastRunStatus: null,
+    createdAt: "2026-05-20T00:00:00.000Z",
+    updatedAt: "2026-05-20T00:00:00.000Z",
   };
 }
 
