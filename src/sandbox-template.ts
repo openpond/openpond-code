@@ -200,7 +200,8 @@ const SandboxTemplateScheduleSchema = z
     command: z.string().trim().min(1).max(2000).optional(),
     target: z
       .object({
-        kind: z.enum(["action", "command"]).optional(),
+        kind: z.enum(["start", "action", "service", "command"]).optional(),
+        name: z.string().trim().min(1).max(120).optional(),
         actionName: z.string().trim().min(1).max(120).optional(),
         command: z.string().trim().min(1).max(2000).optional(),
         requiresStart: z.boolean().optional(),
@@ -261,14 +262,25 @@ const SandboxTemplateScheduleSchema = z
       });
     }
     const command = schedule.command ?? schedule.target?.command ?? null;
+    const targetName = schedule.target?.name ?? null;
     const actionName =
-      schedule.actionName ?? schedule.action ?? schedule.target?.actionName ?? null;
+      schedule.actionName ??
+      schedule.action ??
+      schedule.target?.actionName ??
+      (schedule.target?.kind === "action" ? targetName : null);
     const kind = schedule.target?.kind ?? (command ? "command" : "action");
     if (kind === "action" && !actionName) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["action"],
         message: "schedule action target is required",
+      });
+    }
+    if (kind === "service" && !targetName) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["target", "name"],
+        message: "schedule service target name is required",
       });
     }
     if (kind === "command" && !command) {
@@ -856,12 +868,14 @@ function validateMcpEndpoints(
 function validateScheduleTargets(
   manifest: {
     actions: Array<{ name: string }>;
+    services: Array<{ name: string }>;
     schedules: Array<{
       action?: string;
       actionName?: string;
       command?: string;
       target?: {
-        kind?: "action" | "command";
+        kind?: "start" | "action" | "service" | "command";
+        name?: string;
         actionName?: string;
         command?: string;
       };
@@ -870,19 +884,33 @@ function validateScheduleTargets(
   context: z.RefinementCtx,
 ): void {
   const actionNames = new Set(manifest.actions.map((action) => action.name));
+  const serviceNames = new Set(manifest.services.map((service) => service.name));
   for (const [index, schedule] of manifest.schedules.entries()) {
     const command = schedule.command ?? schedule.target?.command ?? null;
     if (schedule.target?.kind === "command" || command) {
       continue;
     }
     const actionName =
-      schedule.actionName ?? schedule.action ?? schedule.target?.actionName ?? null;
+      schedule.actionName ??
+      schedule.action ??
+      schedule.target?.actionName ??
+      (schedule.target?.kind === "action" ? schedule.target?.name : null);
     if (actionName && !actionNames.has(actionName)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["schedules", index, "action"],
         message: `schedule action target does not exist: ${actionName}`,
       });
+    }
+    if (schedule.target?.kind === "service") {
+      const serviceName = schedule.target.name ?? "";
+      if (serviceName && !serviceNames.has(serviceName)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["schedules", index, "target", "name"],
+          message: `schedule service target does not exist: ${serviceName}`,
+        });
+      }
     }
   }
 }
