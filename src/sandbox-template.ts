@@ -96,6 +96,7 @@ const SandboxTemplateCommandSchema = z
     command: z.string().trim().min(1).max(1000),
     cwd: RelativeWorkspacePathSchema.optional(),
     timeoutSeconds: z.number().int().positive().max(86_400).optional(),
+    requiresStart: z.boolean().default(false),
     ports: z.array(SandboxTemplatePortSchema).max(20).default([]),
     artifactPaths: z.array(RelativeWorkspacePathSchema).max(100).default([]),
   })
@@ -170,6 +171,115 @@ const SandboxTemplateEnvInputSchema = z
   })
   .strict();
 
+const SandboxTemplateScheduleDateSchema = z.string().trim().min(1).max(120);
+
+const SandboxTemplateScheduleSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    description: z.string().trim().max(500).optional(),
+    cron: z.string().trim().min(1).max(500).optional(),
+    rate: z.string().trim().min(1).max(500).optional(),
+    once: SandboxTemplateScheduleDateSchema.optional(),
+    scheduleType: z.enum(["rate", "cron", "once"]).optional(),
+    scheduleExpression: z.string().trim().min(1).max(500).optional(),
+    timezone: z.string().trim().min(1).max(100).optional(),
+    enabled: z.boolean().default(true),
+    startAt: SandboxTemplateScheduleDateSchema.optional(),
+    endAt: SandboxTemplateScheduleDateSchema.optional(),
+    maxRuns: z.number().int().positive().nullable().optional(),
+    runtimePolicy: z
+      .enum([
+        "run_and_stop",
+        "run_and_archive",
+        "run_and_delete",
+        "use_existing_running",
+      ])
+      .default("run_and_stop"),
+    action: z.string().trim().min(1).max(120).optional(),
+    actionName: z.string().trim().min(1).max(120).optional(),
+    command: z.string().trim().min(1).max(2000).optional(),
+    target: z
+      .object({
+        kind: z.enum(["action", "command"]).optional(),
+        actionName: z.string().trim().min(1).max(120).optional(),
+        command: z.string().trim().min(1).max(2000).optional(),
+        requiresStart: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+    requiresStart: z.boolean().optional(),
+    budget: z
+      .object({
+        maxUsd: z.string().trim().min(1).max(40).optional(),
+      })
+      .strict()
+      .optional(),
+    resources: SandboxTemplateResourcesSchema.optional(),
+    quotas: z.record(z.string(), z.unknown()).optional(),
+    lifecycle: z.record(z.string(), z.unknown()).optional(),
+    retentionPolicy: z.record(z.string(), z.unknown()).optional(),
+    env: z
+      .array(
+        z
+          .object({
+            name: z
+              .string()
+              .trim()
+              .regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
+              .max(191),
+            value: z.string().optional(),
+            secretRef: z.string().optional(),
+          })
+          .strict(),
+      )
+      .max(100)
+      .optional(),
+    integrationLeases: z.array(z.record(z.string(), z.unknown())).max(20).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict()
+  .superRefine((schedule, context) => {
+    const expressionCount = [
+      schedule.cron,
+      schedule.rate,
+      schedule.once,
+      schedule.scheduleExpression,
+    ].filter((value) => typeof value === "string" && value.trim()).length;
+    if (expressionCount !== 1) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["scheduleExpression"],
+        message:
+          "schedule must declare exactly one of cron, rate, once, or scheduleExpression",
+      });
+    }
+    if (schedule.scheduleExpression && !schedule.scheduleType) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["scheduleType"],
+        message: "scheduleType is required with scheduleExpression",
+      });
+    }
+    const command = schedule.command ?? schedule.target?.command ?? null;
+    const actionName =
+      schedule.actionName ?? schedule.action ?? schedule.target?.actionName ?? null;
+    const kind = schedule.target?.kind ?? (command ? "command" : "action");
+    if (kind === "action" && !actionName) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["action"],
+        message: "schedule action target is required",
+      });
+    }
+    if (kind === "command" && !command) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["command"],
+        message: "schedule command target is required",
+      });
+    }
+  });
+
 export const SandboxTemplateManifestSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -199,6 +309,7 @@ export const SandboxTemplateManifestSchema = z
     start: SandboxTemplateCommandSchema,
     actions: z.array(SandboxTemplateNamedCommandSchema).max(20).default([]),
     services: z.array(SandboxTemplateNamedCommandSchema).max(20).default([]),
+    schedules: z.array(SandboxTemplateScheduleSchema).max(20).default([]),
     mcp: z
       .object({
         endpoints: z.array(SandboxTemplateMcpEndpointSchema).max(10).default([]),
@@ -244,12 +355,14 @@ export const SandboxTemplateManifestSchema = z
     validateInputSchemaUploadTargets(manifest, context);
     validateEnvInputs(manifest, context);
     validateMcpEndpoints(manifest, context);
+    validateScheduleTargets(manifest, context);
   });
 
 export type SandboxTemplateManifest = z.infer<typeof SandboxTemplateManifestSchema>;
 export type SandboxTemplatePort = SandboxTemplateManifest["start"]["ports"][number];
 export type SandboxTemplateCommand = SandboxTemplateManifest["start"];
 export type SandboxTemplateNamedCommand = SandboxTemplateManifest["actions"][number];
+export type SandboxTemplateSchedule = SandboxTemplateManifest["schedules"][number];
 export type SandboxTemplateExecutableKind = "start" | "action" | "service";
 
 export type SandboxTemplateExecutable = SandboxTemplateCommand & {
@@ -386,6 +499,7 @@ export function sandboxTemplateExecutableEntries(
       command: action.command,
       cwd: action.cwd,
       timeoutSeconds: action.timeoutSeconds,
+      requiresStart: action.requiresStart,
       ports: action.ports,
       artifactPaths: commandArtifactPaths(action, manifest),
     })),
@@ -395,6 +509,7 @@ export function sandboxTemplateExecutableEntries(
       command: service.command,
       cwd: service.cwd,
       timeoutSeconds: service.timeoutSeconds,
+      requiresStart: service.requiresStart,
       ports: service.ports,
       artifactPaths: commandArtifactPaths(service, manifest),
     })),
@@ -418,6 +533,7 @@ export function sandboxTemplateBuildMetadata(manifest: SandboxTemplateManifest):
       command: entry.command,
       cwd: entry.cwd ?? null,
       timeoutSeconds: entry.timeoutSeconds ?? null,
+      requiresStart: entry.requiresStart,
       ports: entry.ports.map((port) => port.port),
       artifactPaths: entry.artifactPaths,
     })),
@@ -440,6 +556,7 @@ export function sandboxTemplateBuildMetadata(manifest: SandboxTemplateManifest):
       commands: manifest.validation.commands,
       probes: manifest.validation.probes,
     },
+    schedules: manifest.schedules,
   };
 }
 
@@ -523,6 +640,7 @@ export function sandboxTemplateScaffoldFiles(
       "  artifactPaths:",
       "    - artifacts/result.json",
       "actions: []",
+      "schedules: []",
       "services:",
       "  - name: web",
       "    command: bun run dev",
@@ -730,6 +848,40 @@ function validateMcpEndpoints(
         code: z.ZodIssueCode.custom,
         path: ["mcp", "endpoints", index, "port"],
         message: `app MCP port ${endpoint.port} is not declared on start or services`,
+      });
+    }
+  }
+}
+
+function validateScheduleTargets(
+  manifest: {
+    actions: Array<{ name: string }>;
+    schedules: Array<{
+      action?: string;
+      actionName?: string;
+      command?: string;
+      target?: {
+        kind?: "action" | "command";
+        actionName?: string;
+        command?: string;
+      };
+    }>;
+  },
+  context: z.RefinementCtx,
+): void {
+  const actionNames = new Set(manifest.actions.map((action) => action.name));
+  for (const [index, schedule] of manifest.schedules.entries()) {
+    const command = schedule.command ?? schedule.target?.command ?? null;
+    if (schedule.target?.kind === "command" || command) {
+      continue;
+    }
+    const actionName =
+      schedule.actionName ?? schedule.action ?? schedule.target?.actionName ?? null;
+    if (actionName && !actionNames.has(actionName)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["schedules", index, "action"],
+        message: `schedule action target does not exist: ${actionName}`,
       });
     }
   }

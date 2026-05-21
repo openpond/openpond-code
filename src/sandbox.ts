@@ -124,6 +124,152 @@ export type SandboxCreateInput = {
   metadata?: Record<string, unknown>;
 };
 
+export type SandboxScheduleType = "rate" | "cron" | "once";
+export type SandboxScheduleRuntimePolicy =
+  | "run_and_stop"
+  | "run_and_archive"
+  | "run_and_delete"
+  | "use_existing_running";
+export type SandboxScheduleTargetKind = "action" | "command";
+export type SandboxScheduleLifecycleStatus =
+  | "active"
+  | "completed"
+  | "expired"
+  | "max_runs_reached"
+  | "stopped"
+  | "failed"
+  | "deleted";
+export type SandboxScheduleSyncStatus = "pending" | "syncing" | "synced" | "failed";
+export type SandboxScheduleRunStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "timed_out"
+  | "cancelled";
+export type SandboxScheduleRunCleanupStatus =
+  | "pending"
+  | "succeeded"
+  | "failed"
+  | "skipped";
+export type SandboxScheduleManagementSource = "api" | "ui" | "openpond.yaml";
+
+export type SandboxScheduleTarget = {
+  kind: SandboxScheduleTargetKind;
+  actionName: string | null;
+  command: string | null;
+  requiresStart: boolean;
+};
+
+export type SandboxScheduleCreateInput = {
+  teamId?: string;
+  appId?: string;
+  sourceSandboxId?: string;
+  snapshotId?: string;
+  templateId?: string;
+  name: string;
+  description?: string;
+  scheduleType: SandboxScheduleType;
+  scheduleExpression: string;
+  timezone?: string;
+  enabled?: boolean;
+  startAt?: string | Date | null;
+  endAt?: string | Date | null;
+  maxRuns?: number | null;
+  runtimePolicy?: SandboxScheduleRuntimePolicy;
+  target?: Partial<SandboxScheduleTarget>;
+  actionName?: string;
+  command?: string;
+  requiresStart?: boolean;
+  budget?: Partial<SandboxBudget>;
+  resources?: Partial<SandboxResources>;
+  quotas?: Partial<SandboxQuotaPolicy>;
+  lifecycle?: Record<string, unknown>;
+  retentionPolicy?: Record<string, unknown>;
+  env?: SandboxEnvVarInput[];
+  integrationLeases?: SandboxIntegrationLeaseInput[];
+  metadata?: Record<string, unknown>;
+  managementSource?: SandboxScheduleManagementSource;
+  manifestPath?: string;
+};
+
+export type SandboxScheduleUpdateInput = Partial<
+  Omit<SandboxScheduleCreateInput, "teamId" | "appId" | "sourceSandboxId" | "snapshotId" | "templateId">
+> & {
+  description?: string | null;
+};
+
+export type SandboxScheduleRecord = {
+  id: string;
+  teamId: string;
+  ownerUserId: string;
+  createdByUserId: string;
+  name: string;
+  description: string | null;
+  scheduleType: SandboxScheduleType;
+  scheduleExpression: string;
+  enabled: boolean;
+  timezone: string | null;
+  startAt: string | null;
+  endAt: string | null;
+  maxRuns: number | null;
+  executionCount: number;
+  lifecycleStatus: SandboxScheduleLifecycleStatus;
+  lifecycleReason: string | null;
+  runtimePolicy: SandboxScheduleRuntimePolicy;
+  sourceSandboxId: string | null;
+  snapshotId: string | null;
+  templateId: string | null;
+  target: SandboxScheduleTarget;
+  budget: SandboxBudget | null;
+  resources: SandboxResources | null;
+  quotas: Partial<SandboxQuotaPolicy> | null;
+  lifecycle: Record<string, unknown> | null;
+  retentionPolicy: Record<string, unknown> | null;
+  env: SandboxEnvVarInput[];
+  integrationLeases: SandboxIntegrationLeaseInput[];
+  metadata: Record<string, unknown>;
+  managementSource: SandboxScheduleManagementSource;
+  manifestPath: string | null;
+  awsScheduleProvider: "eventbridge_scheduler" | null;
+  awsScheduleName: string | null;
+  awsScheduleArn: string | null;
+  syncStatus: SandboxScheduleSyncStatus;
+  syncError: string | null;
+  syncRequestedAt: string | null;
+  lastSyncedAt: string | null;
+  lastRunAt: string | null;
+  lastRunStatus: SandboxScheduleRunStatus | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SandboxScheduleRun = {
+  id: string;
+  scheduleId: string;
+  sandboxId: string | null;
+  teamId: string;
+  ownerUserId: string;
+  idempotencyKey: string;
+  status: SandboxScheduleRunStatus;
+  startedAt: string | null;
+  finishedAt: string | null;
+  exitCode: number | null;
+  durationSeconds: number | null;
+  totalUsd: string | null;
+  receiptId: string | null;
+  logRef: string | null;
+  artifactRefs: string[];
+  failureReason: string | null;
+  cleanupStatus: SandboxScheduleRunCleanupStatus;
+  stopPolicyApplied: SandboxScheduleRuntimePolicy | null;
+  logs: string[];
+  output: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type SandboxForkInput = {
   snapshotId?: string;
   visibility?: "private" | "team";
@@ -142,6 +288,7 @@ export type SandboxTemplateLaunchInput = Omit<SandboxForkInput, "snapshotId"> & 
   templateName?: string;
   version?: string;
   useCase?: string;
+  schedules?: SandboxScheduleCreateInput[];
 };
 
 export type SandboxSecretScope = "team" | "app" | "template";
@@ -956,6 +1103,24 @@ export type SandboxForkResponse = {
 
 export type SandboxTemplateLaunchResponse = SandboxForkResponse & {
   template: SandboxTemplateCatalogEntry;
+  schedules?: SandboxScheduleRecord[];
+};
+
+export type SandboxScheduleListResponse = {
+  schedules: SandboxScheduleRecord[];
+};
+
+export type SandboxScheduleResponse = {
+  schedule: SandboxScheduleRecord;
+};
+
+export type SandboxScheduleRunListResponse = {
+  runs: SandboxScheduleRun[];
+};
+
+export type SandboxScheduleRunResponse = {
+  schedule: SandboxScheduleRecord;
+  run: SandboxScheduleRun;
 };
 
 export type SandboxReplayInput = {
@@ -1416,6 +1581,87 @@ export class OpenPondSandboxClient {
       {
         method: "POST",
         body: JSON.stringify(body),
+      },
+    );
+  }
+
+  listSchedules(input: {
+    teamId?: string;
+    appId?: string;
+    sourceSandboxId?: string;
+  } = {}): Promise<SandboxScheduleListResponse> {
+    const query = new URLSearchParams();
+    if (input.teamId) query.set("teamId", input.teamId);
+    if (input.appId) query.set("appId", input.appId);
+    if (input.sourceSandboxId) query.set("sourceSandboxId", input.sourceSandboxId);
+    return this.request<SandboxScheduleListResponse>(
+      `/schedules${query.size > 0 ? `?${query.toString()}` : ""}`,
+    );
+  }
+
+  createSchedule(input: SandboxScheduleCreateInput): Promise<SandboxScheduleResponse> {
+    const query = new URLSearchParams();
+    if (input.appId) query.set("appId", input.appId);
+    const { appId: _appId, ...body } = input;
+    return this.request<SandboxScheduleResponse>(
+      `/schedules${query.size > 0 ? `?${query.toString()}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+  }
+
+  getSchedule(scheduleId: string): Promise<SandboxScheduleResponse> {
+    return this.request<SandboxScheduleResponse>(
+      `/schedules/${encodeURIComponent(scheduleId)}`,
+    );
+  }
+
+  updateSchedule(
+    scheduleId: string,
+    input: SandboxScheduleUpdateInput,
+  ): Promise<SandboxScheduleResponse> {
+    return this.request<SandboxScheduleResponse>(
+      `/schedules/${encodeURIComponent(scheduleId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      },
+    );
+  }
+
+  deleteSchedule(scheduleId: string): Promise<SandboxScheduleResponse> {
+    return this.request<SandboxScheduleResponse>(
+      `/schedules/${encodeURIComponent(scheduleId)}`,
+      {
+        method: "DELETE",
+      },
+    );
+  }
+
+  listScheduleRuns(
+    scheduleId: string,
+    input: { limit?: number } = {},
+  ): Promise<SandboxScheduleRunListResponse> {
+    const query = new URLSearchParams();
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    return this.request<SandboxScheduleRunListResponse>(
+      `/schedules/${encodeURIComponent(scheduleId)}/runs${
+        query.size > 0 ? `?${query.toString()}` : ""
+      }`,
+    );
+  }
+
+  runScheduleNow(
+    scheduleId: string,
+    input: { idempotencyKey?: string } = {},
+  ): Promise<SandboxScheduleRunResponse> {
+    return this.request<SandboxScheduleRunResponse>(
+      `/schedules/${encodeURIComponent(scheduleId)}/run`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
       },
     );
   }

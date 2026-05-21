@@ -994,6 +994,7 @@ async function runSandboxTemplateCommand(
           start: result.manifest.start.command,
           actions: result.manifest.actions.map((action) => action.name),
           services: result.manifest.services.map((service) => service.name),
+          schedules: result.manifest.schedules.map((schedule) => schedule.name),
         },
         null,
         2,
