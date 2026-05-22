@@ -107,13 +107,6 @@ export type SandboxIntegrationLeaseRef = {
   required: boolean;
 };
 
-export type SandboxAgentWorkspaceCreateOptions = Omit<
-  AgentWorkspaceCreateInput,
-  "teamId" | "sandboxId"
-> & {
-  workspaceId?: string;
-};
-
 export type SandboxCreateInput = {
   repo?: string;
   teamId?: string;
@@ -128,7 +121,6 @@ export type SandboxCreateInput = {
   volumes?: SandboxVolumeProvisionInput[];
   integrationLeases?: SandboxIntegrationLeaseInput[];
   integrationConnectionLeases?: SandboxIntegrationConnectionLeaseInput[];
-  agentWorkspace?: SandboxAgentWorkspaceCreateOptions;
   metadata?: Record<string, unknown>;
 };
 
@@ -1081,7 +1073,7 @@ export type SandboxRecord = {
   sourceCommitSha?: string | null;
   teamId: string;
   appId: string | null;
-  agentWorkspaceId?: string | null;
+  runtimeId?: string | null;
   visibility: "private" | "team";
   ownerUserId: string;
   billingAccountId: string;
@@ -1119,7 +1111,7 @@ export type SandboxTemplateCatalogResponse = {
   templates: SandboxTemplateCatalogEntry[];
 };
 
-export type AgentWorkspaceMode =
+export type SandboxRuntimeMode =
   | "readonly"
   | "attempt"
   | "feature"
@@ -1131,10 +1123,11 @@ export type AgentWorkspaceMode =
   | "hotfix"
   | "multi_feature_batch";
 
-export type AgentWorkspaceStatus =
+export type SandboxRuntimeStatus =
   | "created"
   | "materializing"
   | "running"
+  | "waiting_for_user"
   | "paused"
   | "checkpointed"
   | "ready_for_review"
@@ -1144,17 +1137,17 @@ export type AgentWorkspaceStatus =
   | "failed"
   | "expired";
 
-export type AgentWorkspacePromotionPolicy =
+export type SandboxRuntimePromotionPolicy =
   | "none"
   | "manual"
   | "auto_after_checks";
 
-export type AgentWorkspaceActorType = "agent" | "user" | "service" | "schedule";
+export type SandboxRuntimeActorType = "agent" | "user" | "service" | "schedule";
 
-export type AgentWorkspacePermissions = {
+export type SandboxRuntimePermissions = {
   git: {
     read: boolean;
-    writeWorkspaceRef: boolean;
+    writeSourceRef: boolean;
     promote: boolean;
   };
   snapshots: {
@@ -1172,26 +1165,26 @@ export type AgentWorkspacePermissions = {
   };
 };
 
-export type AgentWorkspace = {
+export type SandboxRuntime = {
   id: string;
   teamId: string;
   ownerUserId: string;
   createdByUserId: string;
   appId: string | null;
-  mode: AgentWorkspaceMode;
-  status: AgentWorkspaceStatus;
+  mode: SandboxRuntimeMode;
+  status: SandboxRuntimeStatus;
   repoId: string | null;
   baseBranch: string;
   baseSha: string | null;
-  workspaceRef: string | null;
+  sourceRef: string | null;
   currentSha: string | null;
   sandboxId: string | null;
   rootfsSnapshotId: string | null;
   dependencySnapshotId: string | null;
   checkpointSnapshotIds: string[];
   artifactRefs: string[];
-  promotionPolicy: AgentWorkspacePromotionPolicy;
-  permissions: AgentWorkspacePermissions;
+  promotionPolicy: SandboxRuntimePromotionPolicy;
+  permissions: SandboxRuntimePermissions;
   version: number;
   metadata: Record<string, unknown>;
   createdAt: string;
@@ -1200,12 +1193,12 @@ export type AgentWorkspace = {
   archivedAt: string | null;
 };
 
-export type AgentWorkspaceEvent = {
+export type SandboxRuntimeEvent = {
   id: string;
-  workspaceId: string;
+  runtimeId: string;
   teamId: string;
   sequence: number;
-  actorType: AgentWorkspaceActorType;
+  actorType: SandboxRuntimeActorType;
   actorId: string;
   type: string;
   summary: string | null;
@@ -1222,30 +1215,33 @@ export type AgentWorkspaceEvent = {
   createdAt: string;
 };
 
-export type AgentWorkspaceCreateInput = {
+export type SandboxRuntimeCreateInput = {
   teamId?: string;
   appId?: string;
-  mode?: AgentWorkspaceMode;
+  mode?: SandboxRuntimeMode;
   baseBranch?: string;
   baseSha?: string;
   sandboxId?: string;
   rootfsSnapshotId?: string;
   dependencySnapshotId?: string;
-  promotionPolicy?: AgentWorkspacePromotionPolicy;
+  promotionPolicy?: SandboxRuntimePromotionPolicy;
   metadata?: Record<string, unknown>;
 };
 
-export type AgentWorkspaceEventInput = {
+export type SandboxRuntimeSandboxCreateInput = SandboxCreateInput;
+
+export type SandboxRuntimeEventInput = {
   type: string;
   summary?: string | null;
   payload?: Record<string, unknown>;
+  lifecycleHint?: Record<string, unknown>;
   commitSha?: string | null;
   snapshotId?: string | null;
   logRef?: string | null;
   artifactRefs?: string[];
 };
 
-export type AgentWorkspaceCheckpointInput = {
+export type SandboxRuntimeCheckpointInput = {
   name?: string;
   rootfsSnapshotId?: string;
   dependencySnapshotId?: string;
@@ -1253,39 +1249,43 @@ export type AgentWorkspaceCheckpointInput = {
   metadata?: Record<string, unknown>;
 };
 
-export type AgentWorkspacePromoteInput = {
+export type SandboxRuntimePromoteInput = {
   expectedTargetSha: string;
   validationState?: "pending" | "passed";
   summary?: string;
 };
 
-export type AgentWorkspaceTransitionInput = {
-  status: AgentWorkspaceStatus;
+export type SandboxRuntimeTransitionInput = {
+  status: SandboxRuntimeStatus;
   expectedVersion: number;
   summary?: string;
   metadata?: Record<string, unknown>;
 };
 
-export type AgentWorkspaceListResponse = {
-  workspaces: AgentWorkspace[];
+export type SandboxRuntimeListResponse = {
+  runtimes: SandboxRuntime[];
 };
 
-export type AgentWorkspaceResponse = {
-  workspace: AgentWorkspace;
+export type SandboxRuntimeResponse = {
+  runtime: SandboxRuntime;
 };
 
-export type AgentWorkspaceEventResponse = {
-  workspace: AgentWorkspace;
-  event: AgentWorkspaceEvent;
+export type SandboxRuntimeSandboxResponse = SandboxCreateResponse & {
+  runtime: SandboxRuntime;
 };
 
-export type AgentWorkspaceEventsResponse = {
-  workspaceId: string;
-  events: AgentWorkspaceEvent[];
+export type SandboxRuntimeEventResponse = {
+  runtime: SandboxRuntime;
+  event: SandboxRuntimeEvent;
 };
 
-export type AgentWorkspacePromoteResponse = {
-  workspace: AgentWorkspace;
+export type SandboxRuntimeEventsResponse = {
+  runtimeId: string;
+  events: SandboxRuntimeEvent[];
+};
+
+export type SandboxRuntimePromoteResponse = {
+  runtime: SandboxRuntime;
   promotedSha: string;
 };
 
@@ -1516,6 +1516,14 @@ export type SandboxReceiptResponse = {
   receipt: SandboxReceipt;
 };
 
+export type SandboxStartResponse = {
+  sandbox: SandboxRecord;
+};
+
+export type SandboxRestoreResponse = {
+  sandbox: SandboxRecord;
+};
+
 export type SandboxReceiptsResponse = {
   receipts: SandboxReceipt[];
 };
@@ -1656,28 +1664,120 @@ export type OpenPondSandboxMcpServerConfig = {
   headers: Record<string, string>;
 };
 
-export type OpenPondAgentWorkspaceHandle = {
+export type OpenPondRuntimeFilesHandle = {
+  write(path: string, contents: string): Promise<SandboxFileUploadResponse>;
+  read(path: string): Promise<string>;
+  readResponse(
+    input: string | SandboxFileDownloadInput,
+  ): Promise<SandboxFileDownloadResponse>;
+  list(input?: SandboxFileListInput): Promise<SandboxFileListResponse>;
+  delete(
+    path: string,
+    input?: { recursive?: boolean },
+  ): Promise<SandboxFileDeleteResponse>;
+  search(input: SandboxFileSearchInput): Promise<SandboxFileSearchResponse>;
+  stat(path: string): Promise<SandboxFileStatResponse>;
+  mkdir(input: string | SandboxFileMkdirInput): Promise<SandboxFileMkdirResponse>;
+  move(input: SandboxFileMoveInput): Promise<SandboxFileMoveResponse>;
+};
+
+export type OpenPondRuntimeCommandsHandle = {
+  run(command: string | SandboxExecInput): Promise<SandboxExecResponse>;
+};
+
+export type OpenPondRuntimePortsHandle = {
+  expose(port: number | SandboxOpenPortInput): Promise<SandboxOpenPortResponse>;
+};
+
+export type OpenPondAppRuntimeStartInput = Omit<
+  SandboxRuntimeCreateInput,
+  "appId" | "sandboxId"
+> & {
+  sandbox?: SandboxRuntimeSandboxCreateInput;
+  materialize?: boolean;
+};
+
+export type OpenPondAppRuntimeHandle = {
+  start(input?: OpenPondAppRuntimeStartInput): Promise<OpenPondSandboxRuntimeHandle>;
+  runtime(
+    input?: Omit<SandboxRuntimeCreateInput, "appId">,
+  ): Promise<OpenPondSandboxRuntimeHandle>;
+};
+
+export type RuntimeWorkflowCheckpointHintInput = {
+  reason?: string;
+  summary?: string | null;
+  payload?: Record<string, unknown>;
+  artifactRefs?: string[];
+};
+
+export type RuntimeWorkflowWaitForUserInput = {
+  reason?: string;
+  summary?: string | null;
+  payload?: Record<string, unknown>;
+};
+
+export type RuntimeWorkflowKeepAliveInput = {
+  reason?: string;
+  summary?: string | null;
+  payload?: Record<string, unknown>;
+  until?: string | Date;
+  seconds?: number;
+};
+
+export type OpenPondSandboxRuntimeHandle = {
   id: string;
-  initial: AgentWorkspace | null;
-  get(): Promise<AgentWorkspace>;
+  initial: SandboxRuntime | null;
+  get(): Promise<SandboxRuntime>;
+  sandbox(input?: SandboxRuntimeSandboxCreateInput): Promise<SandboxRecord>;
+  resume(input?: SandboxRuntimeSandboxCreateInput): Promise<SandboxRecord>;
+  createSandbox(
+    input?: SandboxRuntimeSandboxCreateInput,
+  ): Promise<SandboxRuntimeSandboxResponse>;
   status(
-    input: AgentWorkspaceTransitionInput | AgentWorkspace["status"],
-  ): Promise<AgentWorkspace>;
-  events(): Promise<AgentWorkspaceEventsResponse>;
-  event(input: AgentWorkspaceEventInput): Promise<AgentWorkspaceEventResponse>;
+    input: SandboxRuntimeTransitionInput | SandboxRuntime["status"],
+  ): Promise<SandboxRuntime>;
+  events(): Promise<SandboxRuntimeEventsResponse>;
+  event(input: SandboxRuntimeEventInput): Promise<SandboxRuntimeEventResponse>;
   recordCommit(
     commitSha: string,
-    input?: Omit<AgentWorkspaceEventInput, "commitSha" | "type"> & {
+    input?: Omit<SandboxRuntimeEventInput, "commitSha" | "type"> & {
       type?: string;
     },
-  ): Promise<AgentWorkspaceEventResponse>;
-  checkpoint(input: AgentWorkspaceCheckpointInput): Promise<AgentWorkspace>;
+  ): Promise<SandboxRuntimeEventResponse>;
+  checkpointHint(
+    input?: RuntimeWorkflowCheckpointHintInput,
+  ): Promise<SandboxRuntimeEventResponse>;
+  waitForUser(input?: RuntimeWorkflowWaitForUserInput): Promise<SandboxRuntime>;
+  keepAlive(
+    input?: RuntimeWorkflowKeepAliveInput,
+  ): Promise<SandboxRuntimeEventResponse>;
+  checkpoint(input: SandboxRuntimeCheckpointInput): Promise<SandboxRuntime>;
+  files: OpenPondRuntimeFilesHandle;
+  commands: OpenPondRuntimeCommandsHandle;
+  ports: OpenPondRuntimePortsHandle;
   promote(
-    input: AgentWorkspacePromoteInput,
+    input: SandboxRuntimePromoteInput,
     options?: { teamId?: string },
-  ): Promise<AgentWorkspacePromoteResponse>;
-  archive(expectedVersion?: number): Promise<AgentWorkspace>;
+  ): Promise<SandboxRuntimePromoteResponse>;
+  archive(expectedVersion?: number): Promise<SandboxRuntime>;
 };
+
+function runtimeKeepaliveUntilIso(
+  input: RuntimeWorkflowKeepAliveInput | undefined,
+): string {
+  if (input?.until instanceof Date) {
+    return input.until.toISOString();
+  }
+  if (typeof input?.until === "string" && input.until.trim()) {
+    return new Date(input.until).toISOString();
+  }
+  const seconds =
+    typeof input?.seconds === "number" && Number.isFinite(input.seconds)
+      ? Math.max(1, Math.trunc(input.seconds))
+      : 60;
+  return new Date(Date.now() + seconds * 1000).toISOString();
+}
 
 export class OpenPondSandboxClient {
   private readonly apiKey: string;
@@ -1690,6 +1790,67 @@ export class OpenPondSandboxClient {
       options.sandboxApiUrl ?? options.baseUrl ?? DEFAULT_OPENPOND_API_BASE_URL,
     );
     this.apiRootUrl = apiRootUrlFromSandboxApiUrl(this.sandboxApiUrl);
+  }
+
+  readonly runtimes = {
+    list: (input: { teamId?: string; appId?: string } = {}) =>
+      this.listSandboxRuntimes(input),
+    create: (input: SandboxRuntimeCreateInput) =>
+      this.createSandboxRuntime(input),
+    createForApp: (
+      appId: string,
+      input: Omit<SandboxRuntimeCreateInput, "appId"> = {},
+    ) => this.createAppSandboxRuntime(appId, input),
+    handle: (runtimeId: string, initial: SandboxRuntime | null = null) =>
+      this.sandboxRuntime(runtimeId, initial),
+    get: (runtimeId: string) => this.getSandboxRuntime(runtimeId),
+    createSandbox: (
+      runtimeId: string,
+      input: SandboxRuntimeSandboxCreateInput = {},
+    ) => this.createSandboxRuntimeSandbox(runtimeId, input),
+    updateStatus: (runtimeId: string, input: SandboxRuntimeTransitionInput) =>
+      this.updateSandboxRuntimeStatus(runtimeId, input),
+    events: (runtimeId: string) => this.listSandboxRuntimeEvents(runtimeId),
+    event: (runtimeId: string, input: SandboxRuntimeEventInput) =>
+      this.emitSandboxRuntimeEvent(runtimeId, input),
+    checkpoint: (runtimeId: string, input: SandboxRuntimeCheckpointInput = {}) =>
+      this.checkpointSandboxRuntime(runtimeId, input),
+    promote: (
+      runtimeId: string,
+      input: SandboxRuntimePromoteInput,
+      options: { teamId?: string } = {},
+    ) => this.promoteSandboxRuntime(runtimeId, input, options),
+  };
+
+  readonly sandboxes = {
+    list: (input: { teamId?: string; appId?: string } = {}) =>
+      this.list(input),
+    create: (input: SandboxCreateInput) => this.create(input),
+    get: (sandboxId: string) => this.get(sandboxId),
+    pricing: () => this.pricing(),
+    costs: (input: { teamId?: string; appId?: string } = {}) =>
+      this.costs(input),
+  };
+
+  apps(appId: string): OpenPondAppRuntimeHandle {
+    return {
+      runtime: (input = {}) => this.createAppSandboxRuntime(appId, input),
+      start: async (input = {}) => {
+        const { sandbox, materialize = true, ...runtimeInput } = input;
+        const runtime = await this.createSandboxRuntime({
+          ...runtimeInput,
+          appId,
+        });
+        const handle = this.sandboxRuntime(runtime.id, runtime);
+        if (materialize) {
+          await handle.createSandbox({
+            appId,
+            ...(sandbox ?? {}),
+          });
+        }
+        return handle;
+      },
+    };
   }
 
   list(input: { teamId?: string; appId?: string } = {}): Promise<SandboxRecord[]> {
@@ -1826,69 +1987,197 @@ export class OpenPondSandboxClient {
     );
   }
 
-  listAgentWorkspaces(input: {
+  listSandboxRuntimes(input: {
     teamId?: string;
     appId?: string;
-  } = {}): Promise<AgentWorkspace[]> {
+  } = {}): Promise<SandboxRuntime[]> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
     if (input.appId) query.set("appId", input.appId);
-    return this.requestApiRoot<AgentWorkspaceListResponse>(
-      `/agent-workspaces${query.size > 0 ? `?${query.toString()}` : ""}`,
-    ).then((payload) => payload.workspaces);
+    return this.requestApiRoot<SandboxRuntimeListResponse>(
+      `/runtimes${query.size > 0 ? `?${query.toString()}` : ""}`,
+    ).then((payload) => payload.runtimes);
   }
 
-  createAgentWorkspace(input: AgentWorkspaceCreateInput): Promise<AgentWorkspace> {
-    return this.requestApiRoot<AgentWorkspaceResponse>("/agent-workspaces", {
+  createSandboxRuntime(input: SandboxRuntimeCreateInput): Promise<SandboxRuntime> {
+    return this.requestApiRoot<SandboxRuntimeResponse>("/runtimes", {
       method: "POST",
       body: JSON.stringify(input),
-    }).then((payload) => payload.workspace);
+    }).then((payload) => payload.runtime);
   }
 
-  createAppAgentWorkspace(
+  createAppSandboxRuntime(
     appId: string,
-    input: Omit<AgentWorkspaceCreateInput, "appId"> = {},
-  ): Promise<OpenPondAgentWorkspaceHandle> {
-    return this.createAgentWorkspace({
+    input: Omit<SandboxRuntimeCreateInput, "appId"> = {},
+  ): Promise<OpenPondSandboxRuntimeHandle> {
+    return this.createSandboxRuntime({
       ...input,
       appId,
-    }).then((workspace) => this.agentWorkspace(workspace.id, workspace));
+    }).then((runtime) => this.sandboxRuntime(runtime.id, runtime));
   }
 
-  agentWorkspace(
-    workspaceId: string,
-    initial: AgentWorkspace | null = null,
-  ): OpenPondAgentWorkspaceHandle {
+  sandboxRuntime(
+    runtimeId: string,
+    initial: SandboxRuntime | null = null,
+  ): OpenPondSandboxRuntimeHandle {
+    const currentSandbox = async (
+      input: SandboxRuntimeSandboxCreateInput = {},
+    ): Promise<SandboxRecord> => {
+      const runtime = await this.getSandboxRuntime(runtimeId);
+      if (runtime.sandboxId) {
+        return this.get(runtime.sandboxId);
+      }
+      return this.createSandboxRuntimeSandbox(runtimeId, input).then(
+        (payload) => payload.sandbox,
+      );
+    };
+    const resume = async (
+      input: SandboxRuntimeSandboxCreateInput = {},
+    ): Promise<SandboxRecord> => {
+      const runtime = await this.getSandboxRuntime(runtimeId);
+      if (!runtime.sandboxId) {
+        return this.createSandboxRuntimeSandbox(runtimeId, input).then(
+          (payload) => payload.sandbox,
+        );
+      }
+      const sandbox = await this.get(runtime.sandboxId);
+      if (sandbox.state === "stopped") {
+        return this.start(sandbox.id).then((payload) => payload.sandbox);
+      }
+      if (sandbox.state === "archived") {
+        return this.restore(sandbox.id).then((payload) => payload.sandbox);
+      }
+      if (sandbox.state === "deleted" || sandbox.state === "error") {
+        return this.createSandboxRuntimeSandbox(runtimeId, input).then(
+          (payload) => payload.sandbox,
+        );
+      }
+      return sandbox;
+    };
+    const checkpointHint = (
+      input: RuntimeWorkflowCheckpointHintInput = {},
+    ) =>
+      this.emitSandboxRuntimeEvent(runtimeId, {
+        type: "workflow.checkpoint_hint",
+        summary: input.summary ?? input.reason ?? "Workflow checkpoint hint",
+        payload: {
+          ...input.payload,
+          reason: input.reason ?? null,
+        },
+        artifactRefs: input.artifactRefs,
+        lifecycleHint: {
+          kind: "checkpoint",
+          reason: input.reason ?? null,
+        },
+      });
+    const waitForUser = async (
+      input: RuntimeWorkflowWaitForUserInput = {},
+    ) => {
+      await this.emitSandboxRuntimeEvent(runtimeId, {
+        type: "workflow.waiting_for_user",
+        summary: input.summary ?? input.reason ?? "Waiting for user",
+        payload: {
+          ...input.payload,
+          reason: input.reason ?? null,
+        },
+        lifecycleHint: {
+          kind: "waiting_for_user",
+          reason: input.reason ?? null,
+        },
+      });
+      const current = await this.getSandboxRuntime(runtimeId);
+      if (current.status === "waiting_for_user") return current;
+      return this.updateSandboxRuntimeStatus(runtimeId, {
+        status: "waiting_for_user",
+        expectedVersion: current.version,
+        summary: input.summary ?? input.reason,
+        metadata: {
+          workflowWaitForUserReason: input.reason ?? null,
+        },
+      });
+    };
+    const keepAlive = (input: RuntimeWorkflowKeepAliveInput = {}) => {
+      const keepaliveUntil = runtimeKeepaliveUntilIso(input);
+      return this.emitSandboxRuntimeEvent(runtimeId, {
+        type: "workflow.keepalive",
+        summary: input.summary ?? input.reason ?? "Workflow keepalive",
+        payload: {
+          ...input.payload,
+          reason: input.reason ?? null,
+          keepaliveUntil,
+        },
+        lifecycleHint: {
+          kind: "keepalive",
+          reason: input.reason ?? null,
+          keepaliveUntil,
+        },
+      });
+    };
     return {
-      id: workspaceId,
+      id: runtimeId,
       initial,
-      get: () => this.getAgentWorkspace(workspaceId),
+      get: () => this.getSandboxRuntime(runtimeId),
+      sandbox: currentSandbox,
+      resume,
+      createSandbox: (input = {}) =>
+        this.createSandboxRuntimeSandbox(runtimeId, input),
       status: async (input) => {
         if (typeof input !== "string") {
-          return this.updateAgentWorkspaceStatus(workspaceId, input);
+          return this.updateSandboxRuntimeStatus(runtimeId, input);
         }
-        const current = await this.getAgentWorkspace(workspaceId);
-        return this.updateAgentWorkspaceStatus(workspaceId, {
+        const current = await this.getSandboxRuntime(runtimeId);
+        return this.updateSandboxRuntimeStatus(runtimeId, {
           status: input,
           expectedVersion: current.version,
         });
       },
-      events: () => this.listAgentWorkspaceEvents(workspaceId),
-      event: (input) => this.emitAgentWorkspaceEvent(workspaceId, input),
+      events: () => this.listSandboxRuntimeEvents(runtimeId),
+      event: (input) => this.emitSandboxRuntimeEvent(runtimeId, input),
       recordCommit: (commitSha, input = {}) =>
-        this.emitAgentWorkspaceEvent(workspaceId, {
+        this.emitSandboxRuntimeEvent(runtimeId, {
           ...input,
           type: input.type ?? "git.commit",
           commitSha,
         }),
-      checkpoint: (input) => this.checkpointAgentWorkspace(workspaceId, input),
+      checkpointHint,
+      waitForUser,
+      keepAlive,
+      checkpoint: (input) => this.checkpointSandboxRuntime(runtimeId, input),
+      files: {
+        write: async (path, contents) =>
+          this.uploadFile((await resume()).id, path, contents),
+        read: async (path) => this.downloadFile((await resume()).id, path),
+        readResponse: async (input) =>
+          this.downloadFileResponse((await resume()).id, input),
+        list: async (input = {}) => this.listFiles((await resume()).id, input),
+        delete: async (path, input = {}) =>
+          this.deleteFile((await resume()).id, path, input),
+        search: async (input) => this.searchFiles((await resume()).id, input),
+        stat: async (path) => this.statFile((await resume()).id, path),
+        mkdir: async (input) => this.mkdir((await resume()).id, input),
+        move: async (input) => this.moveFile((await resume()).id, input),
+      },
+      commands: {
+        run: async (command) =>
+          this.exec(
+            (await resume()).id,
+            typeof command === "string" ? { command } : command,
+          ),
+      },
+      ports: {
+        expose: async (port) =>
+          this.openPort(
+            (await resume()).id,
+            typeof port === "number" ? { port } : port,
+          ),
+      },
       promote: (input, options = {}) =>
-        this.promoteAgentWorkspace(workspaceId, input, options),
+        this.promoteSandboxRuntime(runtimeId, input, options),
       archive: async (expectedVersion) => {
         const version =
           expectedVersion ??
-          (await this.getAgentWorkspace(workspaceId)).version;
-        return this.updateAgentWorkspaceStatus(workspaceId, {
+          (await this.getSandboxRuntime(runtimeId)).version;
+        return this.updateSandboxRuntimeStatus(runtimeId, {
           status: "archived",
           expectedVersion: version,
         });
@@ -1896,39 +2185,52 @@ export class OpenPondSandboxClient {
     };
   }
 
-  getAgentWorkspace(workspaceId: string): Promise<AgentWorkspace> {
-    return this.requestApiRoot<AgentWorkspaceResponse>(
-      `/agent-workspaces/${encodeURIComponent(workspaceId)}`,
-    ).then((payload) => payload.workspace);
+  getSandboxRuntime(runtimeId: string): Promise<SandboxRuntime> {
+    return this.requestApiRoot<SandboxRuntimeResponse>(
+      `/runtimes/${encodeURIComponent(runtimeId)}`,
+    ).then((payload) => payload.runtime);
   }
 
-  updateAgentWorkspaceStatus(
-    workspaceId: string,
-    input: AgentWorkspaceTransitionInput,
-  ): Promise<AgentWorkspace> {
-    return this.requestApiRoot<AgentWorkspaceResponse>(
-      `/agent-workspaces/${encodeURIComponent(workspaceId)}/status`,
+  createSandboxRuntimeSandbox(
+    runtimeId: string,
+    input: SandboxRuntimeSandboxCreateInput = {},
+  ): Promise<SandboxRuntimeSandboxResponse> {
+    return this.requestApiRoot<SandboxRuntimeSandboxResponse>(
+      `/runtimes/${encodeURIComponent(runtimeId)}/sandbox`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    );
+  }
+
+  updateSandboxRuntimeStatus(
+    runtimeId: string,
+    input: SandboxRuntimeTransitionInput,
+  ): Promise<SandboxRuntime> {
+    return this.requestApiRoot<SandboxRuntimeResponse>(
+      `/runtimes/${encodeURIComponent(runtimeId)}/status`,
       {
         method: "PATCH",
         body: JSON.stringify(input),
       },
-    ).then((payload) => payload.workspace);
+    ).then((payload) => payload.runtime);
   }
 
-  listAgentWorkspaceEvents(
-    workspaceId: string,
-  ): Promise<AgentWorkspaceEventsResponse> {
-    return this.requestApiRoot<AgentWorkspaceEventsResponse>(
-      `/agent-workspaces/${encodeURIComponent(workspaceId)}/events`,
+  listSandboxRuntimeEvents(
+    runtimeId: string,
+  ): Promise<SandboxRuntimeEventsResponse> {
+    return this.requestApiRoot<SandboxRuntimeEventsResponse>(
+      `/runtimes/${encodeURIComponent(runtimeId)}/events`,
     );
   }
 
-  emitAgentWorkspaceEvent(
-    workspaceId: string,
-    input: AgentWorkspaceEventInput,
-  ): Promise<AgentWorkspaceEventResponse> {
-    return this.requestApiRoot<AgentWorkspaceEventResponse>(
-      `/agent-workspaces/${encodeURIComponent(workspaceId)}/events`,
+  emitSandboxRuntimeEvent(
+    runtimeId: string,
+    input: SandboxRuntimeEventInput,
+  ): Promise<SandboxRuntimeEventResponse> {
+    return this.requestApiRoot<SandboxRuntimeEventResponse>(
+      `/runtimes/${encodeURIComponent(runtimeId)}/events`,
       {
         method: "POST",
         body: JSON.stringify(input),
@@ -1936,28 +2238,28 @@ export class OpenPondSandboxClient {
     );
   }
 
-  checkpointAgentWorkspace(
-    workspaceId: string,
-    input: AgentWorkspaceCheckpointInput,
-  ): Promise<AgentWorkspace> {
-    return this.requestApiRoot<AgentWorkspaceResponse>(
-      `/agent-workspaces/${encodeURIComponent(workspaceId)}/checkpoints`,
+  checkpointSandboxRuntime(
+    runtimeId: string,
+    input: SandboxRuntimeCheckpointInput,
+  ): Promise<SandboxRuntime> {
+    return this.requestApiRoot<SandboxRuntimeResponse>(
+      `/runtimes/${encodeURIComponent(runtimeId)}/checkpoints`,
       {
         method: "POST",
         body: JSON.stringify(input),
       },
-    ).then((payload) => payload.workspace);
+    ).then((payload) => payload.runtime);
   }
 
-  promoteAgentWorkspace(
-    workspaceId: string,
-    input: AgentWorkspacePromoteInput,
+  promoteSandboxRuntime(
+    runtimeId: string,
+    input: SandboxRuntimePromoteInput,
     options: { teamId?: string } = {},
-  ): Promise<AgentWorkspacePromoteResponse> {
+  ): Promise<SandboxRuntimePromoteResponse> {
     const query = new URLSearchParams();
     if (options.teamId) query.set("teamId", options.teamId);
-    return this.requestApiRoot<AgentWorkspacePromoteResponse>(
-      `/agent-workspaces/${encodeURIComponent(workspaceId)}/promote${
+    return this.requestApiRoot<SandboxRuntimePromoteResponse>(
+      `/runtimes/${encodeURIComponent(runtimeId)}/promote${
         query.size > 0 ? `?${query.toString()}` : ""
       }`,
       {
@@ -2753,6 +3055,21 @@ export class OpenPondSandboxClient {
     return this.request<SandboxReceiptResponse>(`/${encodeURIComponent(sandboxId)}/stop`, {
       method: "POST",
     });
+  }
+
+  start(sandboxId: string): Promise<SandboxStartResponse> {
+    return this.request<SandboxStartResponse>(`/${encodeURIComponent(sandboxId)}/start`, {
+      method: "POST",
+    });
+  }
+
+  restore(sandboxId: string): Promise<SandboxRestoreResponse> {
+    return this.request<SandboxRestoreResponse>(
+      `/${encodeURIComponent(sandboxId)}/restore`,
+      {
+        method: "POST",
+      },
+    );
   }
 
   delete(sandboxId: string): Promise<SandboxRecord> {

@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 
+import { createOpenPondSandboxClient } from "../src/sandbox";
+
 const CLI_SECRET = "cli-secret-value-that-must-not-echo";
 
 type CapturedRequest = {
@@ -103,65 +105,69 @@ describe("sandbox secret CLI output redaction", () => {
     expect(rejected.stderr).toContain("refusing plaintext value for secret-like env FOO_API_KEY");
   });
 
-  test("sandbox create sends low-level agent workspace options", async () => {
+  test("sandbox create sends low-level sandbox runtime options", async () => {
     const requests: CapturedRequest[] = [];
     await withSandboxApi(requests, async (sandboxApiUrl) => {
       const result = await runCli([
         "sandbox",
         "create",
-        "--agent-workspace-mode",
+        "--runtime-mode",
         "feature",
-        "--agent-workspace-app-id",
+        "--runtime-app-id",
         "app_test",
-        "--agent-workspace-base-branch",
+        "--runtime-base-branch",
         "master",
-        "--agent-workspace-promotion-policy",
+        "--runtime-promotion-policy",
         "manual",
         "--sandbox-api-url",
         sandboxApiUrl,
       ]);
 
       expect(result.code).toBe(0);
-      expect(requests[0]?.url).toBe("/v1/sandboxes");
+      expect(requests.map((request) => request.url)).toEqual([
+        "/v1/runtimes",
+        "/v1/runtimes/workspace_test/sandbox",
+      ]);
       expect(requests[0]?.body).toMatchObject({
         appId: "app_test",
-        agentWorkspace: {
-          appId: "app_test",
-          mode: "feature",
-          baseBranch: "master",
-          promotionPolicy: "manual",
-        },
+        mode: "feature",
+        baseBranch: "master",
+        promotionPolicy: "manual",
       });
+      expect(requests[1]?.body).toMatchObject({
+        appId: "app_test",
+      });
+      expect("sandboxRuntime" in (requests[1]?.body ?? {})).toBe(false);
       expect("workspacePurpose" in (requests[0]?.body ?? {})).toBe(false);
     });
   });
 
-  test("sandbox workspace inspection commands read workspace status and events", async () => {
+  test("sandbox runtime inspection commands read runtime status and events", async () => {
     const requests: CapturedRequest[] = [];
     await withSandboxApi(requests, async (sandboxApiUrl) => {
       const list = await runCli([
         "sandbox",
-        "workspace-list",
+        "runtime-list",
         "--sandbox-api-url",
         sandboxApiUrl,
       ]);
-      const workspace = await runCli([
+      const runtime = await runCli([
         "sandbox",
-        "workspace-get",
+        "runtime-get",
         "workspace_test",
         "--sandbox-api-url",
         sandboxApiUrl,
       ]);
       const events = await runCli([
         "sandbox",
-        "workspace-events",
+        "runtime-events",
         "workspace_test",
         "--sandbox-api-url",
         sandboxApiUrl,
       ]);
       const eventWrite = await runCli([
         "sandbox",
-        "workspace-event",
+        "runtime-event",
         "workspace_test",
         "--type",
         "workflow.checkpoint_hint",
@@ -176,7 +182,7 @@ describe("sandbox secret CLI output redaction", () => {
       ]);
       const statusWrite = await runCli([
         "sandbox",
-        "workspace-status",
+        "runtime-status",
         "workspace_test",
         "--status",
         "waiting_for_user",
@@ -189,17 +195,17 @@ describe("sandbox secret CLI output redaction", () => {
       ]);
 
       expect(list.code).toBe(0);
-      expect(workspace.code).toBe(0);
+      expect(runtime.code).toBe(0);
       expect(events.code).toBe(0);
       expect(eventWrite.code).toBe(0);
       expect(statusWrite.code).toBe(0);
-      expect(JSON.parse(list.stdout).workspaces).toContainEqual(
+      expect(JSON.parse(list.stdout).runtimes).toContainEqual(
         expect.objectContaining({
           id: "workspace_test",
           status: "waiting_for_user",
         }),
       );
-      expect(JSON.parse(workspace.stdout).workspace).toMatchObject({
+      expect(JSON.parse(runtime.stdout).runtime).toMatchObject({
         id: "workspace_test",
         status: "waiting_for_user",
       });
@@ -211,24 +217,79 @@ describe("sandbox secret CLI output redaction", () => {
       expect(JSON.parse(eventWrite.stdout).event).toMatchObject({
         type: "workflow.checkpoint_hint",
       });
-      expect(JSON.parse(statusWrite.stdout).workspace).toMatchObject({
+      expect(JSON.parse(statusWrite.stdout).runtime).toMatchObject({
         id: "workspace_test",
         status: "waiting_for_user",
       });
-      expect(requests.map((request) => request.url)).toContain("/v1/agent-workspaces");
+      expect(requests.map((request) => request.url)).toContain("/v1/runtimes");
       expect(requests.map((request) => request.url)).toContain(
-        "/v1/agent-workspaces/workspace_test",
+        "/v1/runtimes/workspace_test",
       );
       expect(requests.map((request) => request.url)).toContain(
-        "/v1/agent-workspaces/workspace_test/events",
+        "/v1/runtimes/workspace_test/events",
       );
       expect(
         requests.some(
           (request) =>
             request.method === "PATCH" &&
-            request.url === "/v1/agent-workspaces/workspace_test/status",
+            request.url === "/v1/runtimes/workspace_test/status",
         ),
       ).toBe(true);
+    });
+  });
+
+  test("sdk app runtime helpers materialize and resume attached sandboxes", async () => {
+    const requests: CapturedRequest[] = [];
+    await withSandboxApi(requests, async (sandboxApiUrl) => {
+      const client = createOpenPondSandboxClient({
+        apiKey: "opk_test_cli",
+        sandboxApiUrl,
+      });
+
+      const runtime = await client.apps("app_test").start({
+        mode: "feature",
+        sandbox: { command: "echo ready" },
+      });
+      const exec = await runtime.commands.run("echo hi");
+      const waiting = await runtime.waitForUser({
+        reason: "awaiting_next_prompt",
+      });
+      const rawSandbox = await client.sandboxes.create({
+        command: "echo raw",
+      });
+
+      expect(runtime.id).toBe("workspace_test");
+      expect(exec.command.command).toBe("echo hi");
+      expect(waiting.status).toBe("waiting_for_user");
+      expect(rawSandbox.runtimeId).toBeNull();
+      expect(requests.map((request) => request.url)).toEqual([
+        "/v1/runtimes",
+        "/v1/runtimes/workspace_test/sandbox",
+        "/v1/runtimes/workspace_test",
+        "/v1/sandboxes/sandbox_test",
+        "/v1/sandboxes/sandbox_test/exec",
+        "/v1/runtimes/workspace_test/events",
+        "/v1/runtimes/workspace_test",
+        "/v1/sandboxes",
+      ]);
+      expect(requests[0]?.body).toMatchObject({
+        appId: "app_test",
+        mode: "feature",
+      });
+      expect(requests[1]?.body).toMatchObject({
+        appId: "app_test",
+        command: "echo ready",
+      });
+      expect(requests[4]?.body).toMatchObject({
+        command: "echo hi",
+      });
+      expect(requests[5]?.body).toMatchObject({
+        type: "workflow.waiting_for_user",
+        lifecycleHint: {
+          kind: "waiting_for_user",
+          reason: "awaiting_next_prompt",
+        },
+      });
     });
   });
 
@@ -601,7 +662,7 @@ describe("sandbox secret CLI output redaction", () => {
     });
   });
 
-  test("sandbox template start sends network, env refs, and agent workspace options", async () => {
+  test("sandbox template start sends network, env refs, and sandbox runtime options", async () => {
     const requests: CapturedRequest[] = [];
     await withSandboxApi(requests, async (sandboxApiUrl) => {
       const projectDir = await mkdtemp(path.join(os.tmpdir(), "openpond-cli-template-agent-"));
@@ -613,7 +674,7 @@ describe("sandbox secret CLI output redaction", () => {
             "name: agent-template-start",
             "version: 0.0.1",
             "useCase: sandbox-template-example",
-            "description: Agent workspace template start test.",
+            "description: Sandbox runtime template start test.",
             "runtime:",
             "  base: node-bun-workspace",
             "resources:",
@@ -649,13 +710,13 @@ describe("sandbox secret CLI output redaction", () => {
             "https://github.com/octocat/Hello-World",
             "--env-ref",
             "FOO_API_KEY=openpond://secret/team_test/secret_test#v1",
-            "--agent-workspace-mode",
+            "--runtime-mode",
             "attempt",
-            "--agent-workspace-app-id",
+            "--runtime-app-id",
             "app_test",
-            "--agent-workspace-base-branch",
+            "--runtime-base-branch",
             "master",
-            "--agent-workspace-promotion-policy",
+            "--runtime-promotion-policy",
             "manual",
             "--sandbox-api-url",
             sandboxApiUrl,
@@ -665,9 +726,20 @@ describe("sandbox secret CLI output redaction", () => {
         );
 
         expect(result.code).toBe(0);
+        const workspaceRequest = requests.find(
+          (request) =>
+            request.method === "POST" && request.url === "/v1/runtimes",
+        );
+        expect(workspaceRequest?.body).toMatchObject({
+          appId: "app_test",
+          mode: "attempt",
+          baseBranch: "master",
+          promotionPolicy: "manual",
+        });
         const createRequest = requests.find(
           (request) =>
-            request.method === "POST" && request.url === "/v1/sandboxes",
+            request.method === "POST" &&
+            request.url === "/v1/runtimes/workspace_test/sandbox",
         );
         expect(createRequest?.body).toMatchObject({
           appId: "app_test",
@@ -680,20 +752,15 @@ describe("sandbox secret CLI output redaction", () => {
           networkPolicy: {
             internetEgress: "allow",
           },
-          agentWorkspace: {
-            appId: "app_test",
-            mode: "attempt",
-            baseBranch: "master",
-            promotionPolicy: "manual",
-          },
         });
+        expect("sandboxRuntime" in (createRequest?.body ?? {})).toBe(false);
         const processRequest = requests.find(
           (request) =>
             request.method === "POST" &&
             request.url === "/v1/sandboxes/sandbox_test/processes",
         );
         expect(processRequest?.body.command).toContain(
-          "OPENPOND_AGENT_WORKSPACE_ID='workspace_test'",
+          "OPENPOND_SANDBOX_RUNTIME_ID='workspace_test'",
         );
         expect(processRequest?.body.command).toContain(
           "OPENPOND_SANDBOX_ID='sandbox_test'",
@@ -788,23 +855,23 @@ async function withSandboxApi(
       return;
     }
 
-    if (request.url === "/v1/agent-workspaces" && request.method === "GET") {
+    if (request.url === "/v1/runtimes" && request.method === "GET") {
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ workspaces: [agentWorkspaceRecord()] }));
+      response.end(JSON.stringify({ runtimes: [sandboxRuntimeRecord()] }));
       return;
     }
 
     if (
-      request.url === "/v1/agent-workspaces/workspace_test" &&
+      request.url === "/v1/runtimes/workspace_test" &&
       request.method === "GET"
     ) {
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ workspace: agentWorkspaceRecord() }));
+      response.end(JSON.stringify({ runtime: sandboxRuntimeRecord() }));
       return;
     }
 
     if (
-      request.url === "/v1/agent-workspaces/workspace_test/events" &&
+      request.url === "/v1/runtimes/workspace_test/events" &&
       request.method === "GET"
     ) {
       response.writeHead(200, { "content-type": "application/json" });
@@ -813,7 +880,7 @@ async function withSandboxApi(
           events: [
             {
               id: "event_test",
-              workspaceId: "workspace_test",
+              runtimeId: "workspace_test",
               sequence: 1,
               type: "workflow.waiting_for_user",
               summary: "waiting",
@@ -836,16 +903,16 @@ async function withSandboxApi(
     }
 
     if (
-      request.url === "/v1/agent-workspaces/workspace_test/events" &&
+      request.url === "/v1/runtimes/workspace_test/events" &&
       request.method === "POST"
     ) {
       response.writeHead(201, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
-          workspace: agentWorkspaceRecord(),
+          runtime: sandboxRuntimeRecord(),
           event: {
             id: "event_written",
-            workspaceId: "workspace_test",
+            runtimeId: "workspace_test",
             sequence: 2,
             type: body.type,
             summary: body.summary ?? null,
@@ -858,14 +925,14 @@ async function withSandboxApi(
     }
 
     if (
-      request.url === "/v1/agent-workspaces/workspace_test/status" &&
+      request.url === "/v1/runtimes/workspace_test/status" &&
       request.method === "PATCH"
     ) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
-          workspace: {
-            ...agentWorkspaceRecord(),
+          runtime: {
+            ...sandboxRuntimeRecord(),
             status: body.status,
           },
         }),
@@ -950,13 +1017,59 @@ async function withSandboxApi(
       return;
     }
 
+    if (request.url === "/v1/runtimes" && request.method === "POST") {
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          runtime: sandboxRuntimeRecord({
+            appId: typeof body.appId === "string" ? body.appId : null,
+          }),
+        }),
+      );
+      return;
+    }
+
+    if (
+      request.url === "/v1/runtimes/workspace_test/sandbox" &&
+      request.method === "POST"
+    ) {
+      response.writeHead(202, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          runtime: sandboxRuntimeRecord({
+            appId: typeof body.appId === "string" ? body.appId : null,
+          }),
+          sandbox: sandboxRecord({ runtimeId: "workspace_test" }),
+        }),
+      );
+      return;
+    }
+
     if (request.url === "/v1/sandboxes" && request.method === "POST") {
       response.writeHead(201, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
-          sandbox: sandboxRecord({
-            agentWorkspaceId: body.agentWorkspace ? "workspace_test" : null,
-          }),
+          sandbox: sandboxRecord({ runtimeId: null }),
+        }),
+      );
+      return;
+    }
+
+    if (request.url === "/v1/sandboxes/sandbox_test" && request.method === "GET") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          sandbox: sandboxRecord({ runtimeId: "workspace_test" }),
+        }),
+      );
+      return;
+    }
+
+    if (request.url === "/v1/sandboxes/sandbox_test/start" && request.method === "POST") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          sandbox: sandboxRecord({ runtimeId: "workspace_test" }),
         }),
       );
       return;
@@ -1069,7 +1182,7 @@ function runCli(args: string[], stdin = "", options: { cwd?: string } = {}): Pro
 }
 
 function sandboxRecord(
-  overrides: { agentWorkspaceId?: string | null } = {},
+  overrides: { runtimeId?: string | null } = {},
 ): Record<string, unknown> {
   return {
     id: "sandbox_test",
@@ -1080,7 +1193,7 @@ function sandboxRecord(
     appId: null,
     visibility: "private",
     ownerUserId: "user_test",
-    agentWorkspaceId: overrides.agentWorkspaceId ?? null,
+    runtimeId: overrides.runtimeId ?? null,
     billingAccountId: "billing_test",
     resources: { cpu: 1, memoryGb: 1, diskGb: 4 },
     budget: { maxUsd: "0.05" },
@@ -1105,19 +1218,21 @@ function sandboxRecord(
   };
 }
 
-function agentWorkspaceRecord(): Record<string, unknown> {
+function sandboxRuntimeRecord(
+  overrides: { appId?: string | null } = {},
+): Record<string, unknown> {
   return {
     id: "workspace_test",
     teamId: "team_test",
     userId: "user_test",
-    appId: null,
+    appId: overrides.appId ?? null,
     sandboxId: "sandbox_test",
     mode: "attempt",
     status: "waiting_for_user",
     baseBranch: "master",
     baseSha: null,
     currentSha: null,
-    workspaceRef: null,
+    sourceRef: null,
     rootfsSnapshotId: null,
     dependencySnapshotId: null,
     checkpointSnapshotIds: [],

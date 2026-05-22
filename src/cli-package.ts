@@ -68,9 +68,11 @@ import {
   type OpenPondOrganizationMemberUpsertInput,
   type OpenPondOrganizationRole,
   type OpenPondOrganizationUpdateInput,
-  type AgentWorkspaceMode,
-  type AgentWorkspacePromotionPolicy,
-  type AgentWorkspaceStatus,
+  type SandboxRuntime,
+  type SandboxRuntimeCreateInput,
+  type SandboxRuntimeMode,
+  type SandboxRuntimePromotionPolicy,
+  type SandboxRuntimeStatus,
   type SandboxCreateInput,
   type SandboxEnvVarInput,
   type SandboxIntegrationConnectionLeaseInput,
@@ -104,7 +106,7 @@ import {
 
 const DEFAULT_OPENPOND_API_HOST = new URL(DEFAULT_OPENPOND_API_BASE_URL).hostname;
 const DEFAULT_OPENPOND_WEB_HOST = new URL(DEFAULT_OPENPOND_WEB_BASE_URL).hostname;
-const AGENT_WORKSPACE_MODES: AgentWorkspaceMode[] = [
+const SANDBOX_RUNTIME_MODES: SandboxRuntimeMode[] = [
   "readonly",
   "attempt",
   "feature",
@@ -116,7 +118,7 @@ const AGENT_WORKSPACE_MODES: AgentWorkspaceMode[] = [
   "hotfix",
   "multi_feature_batch",
 ];
-const AGENT_WORKSPACE_PROMOTION_POLICIES: AgentWorkspacePromotionPolicy[] = [
+const SANDBOX_RUNTIME_PROMOTION_POLICIES: SandboxRuntimePromotionPolicy[] = [
   "none",
   "manual",
   "auto_after_checks",
@@ -141,6 +143,17 @@ type Command =
   | "check-update"
   | "version"
   | "help";
+
+type SandboxCreatePlan = {
+  sandbox: SandboxCreateInput;
+  sandboxRuntime?: SandboxRuntimeCreateInput;
+  runtimeId?: string;
+};
+
+type SandboxCreatePlanResult = {
+  sandbox: SandboxRecord;
+  runtime?: SandboxRuntime;
+};
 
 function getInstalledCliVersion(): string {
   try {
@@ -435,33 +448,33 @@ function parseCsvOption(value: string | boolean | undefined): string[] {
     .filter(Boolean);
 }
 
-function parseAgentWorkspaceModeOption(
+function parseSandboxRuntimeModeOption(
   value: string | boolean | undefined,
-): AgentWorkspaceMode | undefined {
+): SandboxRuntimeMode | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || !value.trim()) {
-    throw new Error("agent-workspace-mode must be a non-empty value");
+    throw new Error("runtime-mode must be a non-empty value");
   }
-  const mode = value.trim() as AgentWorkspaceMode;
-  if (!AGENT_WORKSPACE_MODES.includes(mode)) {
+  const mode = value.trim() as SandboxRuntimeMode;
+  if (!SANDBOX_RUNTIME_MODES.includes(mode)) {
     throw new Error(
-      `agent-workspace-mode must be one of ${AGENT_WORKSPACE_MODES.join(", ")}`,
+      `runtime-mode must be one of ${SANDBOX_RUNTIME_MODES.join(", ")}`,
     );
   }
   return mode;
 }
 
-function parseAgentWorkspacePromotionPolicyOption(
+function parseSandboxRuntimePromotionPolicyOption(
   value: string | boolean | undefined,
-): AgentWorkspacePromotionPolicy | undefined {
+): SandboxRuntimePromotionPolicy | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || !value.trim()) {
-    throw new Error("agent-workspace-promotion-policy must be a non-empty value");
+    throw new Error("runtime-promotion-policy must be a non-empty value");
   }
-  const policy = value.trim() as AgentWorkspacePromotionPolicy;
-  if (!AGENT_WORKSPACE_PROMOTION_POLICIES.includes(policy)) {
+  const policy = value.trim() as SandboxRuntimePromotionPolicy;
+  if (!SANDBOX_RUNTIME_PROMOTION_POLICIES.includes(policy)) {
     throw new Error(
-      `agent-workspace-promotion-policy must be one of ${AGENT_WORKSPACE_PROMOTION_POLICIES.join(", ")}`,
+      `runtime-promotion-policy must be one of ${SANDBOX_RUNTIME_PROMOTION_POLICIES.join(", ")}`,
     );
   }
   return policy;
@@ -1720,7 +1733,7 @@ function buildSandboxTemplateStartCreateInput(
   manifest: SandboxTemplateManifest,
   options: Record<string, string | boolean>,
   repo: string,
-): SandboxCreateInput {
+): SandboxCreatePlan {
   const budgetUsd =
     typeof options.budgetUsd === "string" && options.budgetUsd.trim()
       ? options.budgetUsd.trim()
@@ -1731,41 +1744,41 @@ function buildSandboxTemplateStartCreateInput(
   const idleTimeoutSeconds = parseIntegerOption(options.idleTimeoutSeconds, "idle-timeout-seconds");
   const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
   const requestedAppId = typeof options.appId === "string" ? options.appId.trim() : "";
-  const agentWorkspaceAppId =
-    typeof options.agentWorkspaceAppId === "string"
-      ? options.agentWorkspaceAppId.trim()
+  const sandboxRuntimeAppId =
+    typeof options.runtimeAppId === "string"
+      ? options.runtimeAppId.trim()
       : "";
-  if (requestedAppId && agentWorkspaceAppId && requestedAppId !== agentWorkspaceAppId) {
-    throw new Error("app-id and agent-workspace-app-id must match when both are set");
+  if (requestedAppId && sandboxRuntimeAppId && requestedAppId !== sandboxRuntimeAppId) {
+    throw new Error("app-id and runtime-app-id must match when both are set");
   }
-  const appId = requestedAppId || agentWorkspaceAppId;
-  const agentWorkspaceMode = parseAgentWorkspaceModeOption(options.agentWorkspaceMode);
-  const agentWorkspacePromotionPolicy = parseAgentWorkspacePromotionPolicyOption(
-    options.agentWorkspacePromotionPolicy,
+  const appId = requestedAppId || sandboxRuntimeAppId;
+  const sandboxRuntimeMode = parseSandboxRuntimeModeOption(options.runtimeMode);
+  const sandboxRuntimePromotionPolicy = parseSandboxRuntimePromotionPolicyOption(
+    options.runtimePromotionPolicy,
   );
-  const agentWorkspaceBaseBranch =
-    typeof options.agentWorkspaceBaseBranch === "string" &&
-    options.agentWorkspaceBaseBranch.trim()
-      ? options.agentWorkspaceBaseBranch.trim()
+  const sandboxRuntimeBaseBranch =
+    typeof options.runtimeBaseBranch === "string" &&
+    options.runtimeBaseBranch.trim()
+      ? options.runtimeBaseBranch.trim()
       : "";
-  const agentWorkspaceBaseSha =
-    typeof options.agentWorkspaceBaseSha === "string" && options.agentWorkspaceBaseSha.trim()
-      ? options.agentWorkspaceBaseSha.trim()
+  const sandboxRuntimeBaseSha =
+    typeof options.runtimeBaseSha === "string" && options.runtimeBaseSha.trim()
+      ? options.runtimeBaseSha.trim()
       : "";
-  const agentWorkspaceId =
-    typeof options.agentWorkspaceId === "string" && options.agentWorkspaceId.trim()
-      ? options.agentWorkspaceId.trim()
+  const runtimeId =
+    typeof options.runtimeId === "string" && options.runtimeId.trim()
+      ? options.runtimeId.trim()
       : "";
-  const agentWorkspaceRequested = Boolean(
-    agentWorkspaceMode ||
-      agentWorkspacePromotionPolicy ||
-      agentWorkspaceBaseBranch ||
-      agentWorkspaceBaseSha ||
-      agentWorkspaceId ||
-      agentWorkspaceAppId,
+  const sandboxRuntimeRequested = Boolean(
+    sandboxRuntimeMode ||
+      sandboxRuntimePromotionPolicy ||
+      sandboxRuntimeBaseBranch ||
+      sandboxRuntimeBaseSha ||
+      runtimeId ||
+      sandboxRuntimeAppId,
   );
   const env = parseSandboxTemplateEnvOptions(manifest, options);
-  return {
+  const sandbox: SandboxCreateInput = {
     repo,
     ...(teamId ? { teamId } : {}),
     ...(appId ? { appId } : {}),
@@ -1781,20 +1794,6 @@ function buildSandboxTemplateStartCreateInput(
     },
     ...(env.length > 0 ? { env } : {}),
     volumes: manifest.volumes,
-    ...(agentWorkspaceRequested
-      ? {
-          agentWorkspace: {
-            ...(agentWorkspaceId ? { workspaceId: agentWorkspaceId } : {}),
-            ...(agentWorkspaceMode ? { mode: agentWorkspaceMode } : {}),
-            ...(appId ? { appId } : {}),
-            baseBranch: agentWorkspaceBaseBranch || "master",
-            ...(agentWorkspaceBaseSha ? { baseSha: agentWorkspaceBaseSha } : {}),
-            ...(agentWorkspacePromotionPolicy
-              ? { promotionPolicy: agentWorkspacePromotionPolicy }
-              : {}),
-          },
-        }
-      : {}),
     metadata: {
       source: "openpond-code-sandbox-template-start",
       manifestFile: OPENPOND_MANIFEST_FILE_NAME,
@@ -1804,6 +1803,24 @@ function buildSandboxTemplateStartCreateInput(
         useCase: manifest.useCase,
       },
     },
+  };
+  return {
+    sandbox,
+    ...(sandboxRuntimeRequested && runtimeId ? { runtimeId } : {}),
+    ...(sandboxRuntimeRequested && !runtimeId
+      ? {
+          sandboxRuntime: {
+            ...(teamId ? { teamId } : {}),
+            ...(sandboxRuntimeMode ? { mode: sandboxRuntimeMode } : {}),
+            ...(appId ? { appId } : {}),
+            baseBranch: sandboxRuntimeBaseBranch || "master",
+            ...(sandboxRuntimeBaseSha ? { baseSha: sandboxRuntimeBaseSha } : {}),
+            ...(sandboxRuntimePromotionPolicy
+              ? { promotionPolicy: sandboxRuntimePromotionPolicy }
+              : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -2148,19 +2165,39 @@ function sandboxTemplateScheduleCommandTarget(
 
 async function createSandboxTemplateStartSandbox(
   client: OpenPondSandboxClient,
-  input: SandboxCreateInput,
+  plan: SandboxCreatePlan,
   repo: string,
 ): Promise<SandboxRecord> {
   const requestedAt = Date.now();
   try {
-    return await client.create(input);
+    return (await createSandboxFromPlan(client, plan)).sandbox;
   } catch (error) {
     if (!isLikelySandboxCreateTimeout(error)) {
       throw error;
     }
     console.warn("warning: sandbox create timed out; checking for the created sandbox record");
-    return recoverTimedOutSandboxCreate(client, input, repo, requestedAt);
+    return recoverTimedOutSandboxCreate(client, plan.sandbox, repo, requestedAt);
   }
+}
+
+async function createSandboxFromPlan(
+  client: OpenPondSandboxClient,
+  plan: SandboxCreatePlan,
+): Promise<SandboxCreatePlanResult> {
+  if (!plan.sandboxRuntime && !plan.runtimeId) {
+    return { sandbox: await client.create(plan.sandbox) };
+  }
+
+  const runtime =
+    plan.runtimeId
+      ? undefined
+      : await client.createSandboxRuntime(plan.sandboxRuntime!);
+  const runtimeId = plan.runtimeId ?? runtime!.id;
+  const result = await client.createSandboxRuntimeSandbox(runtimeId, plan.sandbox);
+  return {
+    sandbox: result.sandbox,
+    runtime: result.runtime ?? runtime,
+  };
 }
 
 function isLikelySandboxCreateTimeout(error: unknown): boolean {
@@ -2808,8 +2845,8 @@ async function runSandboxTemplateProcessToCompletion(
 function sandboxTemplateRuntimeEnv(sandbox: SandboxRecord): Record<string, string> {
   return {
     OPENPOND_SANDBOX_ID: sandbox.id,
-    ...(sandbox.agentWorkspaceId
-      ? { OPENPOND_AGENT_WORKSPACE_ID: sandbox.agentWorkspaceId }
+    ...(sandbox.runtimeId
+      ? { OPENPOND_SANDBOX_RUNTIME_ID: sandbox.runtimeId }
       : {}),
   };
 }
@@ -2913,7 +2950,7 @@ function printHelp(): void {
   console.log(`  openpond sandbox-template run [--file ${OPENPOND_MANIFEST_FILE_NAME}|--build dist/${SANDBOX_TEMPLATE_BUILD_PLAN_FILE_NAME}] [--target <name>|--action <name>|--service <name>]`);
   console.log(`  openpond sandbox-template dev [--file ${OPENPOND_MANIFEST_FILE_NAME}|--build dist/${SANDBOX_TEMPLATE_BUILD_PLAN_FILE_NAME}] [--service <name>]`);
   console.log(
-    `  openpond sandbox-template start [--file ${OPENPOND_MANIFEST_FILE_NAME}] [--env-ref NAME=openpond://secret/...] [--input-file name=path] [--input-files name=glob] [--target <name>|--action <name>|--service <name>] [--agent-workspace-mode <mode> --agent-workspace-app-id <appId>] [--enable-schedules [all|name,...]|--disable-schedules [all|name,...]] [--schedule-overrides <json>] [--commit] [--no-push]`,
+    `  openpond sandbox-template start [--file ${OPENPOND_MANIFEST_FILE_NAME}] [--env-ref NAME=openpond://secret/...] [--input-file name=path] [--input-files name=glob] [--target <name>|--action <name>|--service <name>] [--runtime-mode <mode> --runtime-app-id <appId>] [--enable-schedules [all|name,...]|--disable-schedules [all|name,...]] [--schedule-overrides <json>] [--commit] [--no-push]`,
   );
   console.log(`  openpond sandbox-template action <sandboxId> <actionName> [--file ${OPENPOND_MANIFEST_FILE_NAME}]`);
   console.log(
@@ -2954,11 +2991,11 @@ function printHelp(): void {
   console.log("  openpond sandbox replay-cancel <replayId> [--team-id <id>]");
   console.log("  openpond sandbox replay-watch <replayId> [--team-id <id>] [--interval-ms 5000] [--timeout-ms 900000]");
   console.log("  openpond sandbox replay-artifacts <replayId> [--team-id <id>]");
-  console.log("  openpond sandbox workspace-list [--team-id <id>] [--app-id <id>]");
-  console.log("  openpond sandbox workspace-get <workspaceId>");
-  console.log("  openpond sandbox workspace-events <workspaceId>");
-  console.log("  openpond sandbox workspace-status <workspaceId> --status <status> --expected-version <n>");
-  console.log("  openpond sandbox workspace-event <workspaceId> --type <eventType> [--summary <text>] [--payload <json>] [--lifecycle-hint <json>]");
+  console.log("  openpond sandbox runtime-list [--team-id <id>] [--app-id <id>]");
+  console.log("  openpond sandbox runtime-get <runtimeId>");
+  console.log("  openpond sandbox runtime-events <runtimeId>");
+  console.log("  openpond sandbox runtime-status <runtimeId> --status <status> --expected-version <n>");
+  console.log("  openpond sandbox runtime-event <runtimeId> --type <eventType> [--summary <text>] [--payload <json>] [--lifecycle-hint <json>]");
   console.log("  openpond sandbox pricing");
   console.log("  openpond sandbox costs [--team-id <id>] [--app-id <id>] [--summary]");
   console.log("  openpond sandbox template-launch [--snapshot-id <id>|--template-name <name>|--use-case <id>] [--version <v>] [--team-id <id>] [--budget-usd 0.05]");
@@ -2973,10 +3010,10 @@ function printHelp(): void {
   );
   console.log("  openpond sandbox snapshot-publish <sandboxId> <snapshotId>");
   console.log(
-    "  openpond sandbox create [--repo <url>] [--budget-usd 0.05] [--env-ref NAME=openpond://secret/...] [--env-literal NAME=value] [--agent-workspace-mode feature --agent-workspace-app-id <appId> --agent-workspace-base-branch master]",
+    "  openpond sandbox create [--repo <url>] [--budget-usd 0.05] [--env-ref NAME=openpond://secret/...] [--env-literal NAME=value] [--runtime-mode feature --runtime-app-id <appId> --runtime-base-branch master]",
   );
   console.log(
-    "    example: openpond sandbox create --agent-workspace-mode feature --agent-workspace-app-id app_123 --agent-workspace-base-branch master",
+    "    example: openpond sandbox create --runtime-mode feature --runtime-app-id app_123 --runtime-base-branch master",
   );
   console.log('  openpond sandbox exec <sandboxId> --command "bun test"');
   console.log(
@@ -5019,7 +5056,7 @@ function buildSandboxReplayInput(
   };
 }
 
-function buildSandboxCreateInput(options: Record<string, string | boolean>): SandboxCreateInput {
+function buildSandboxCreateInput(options: Record<string, string | boolean>): SandboxCreatePlan {
   const repo = typeof options.repo === "string" ? options.repo.trim() : "";
   const command =
     typeof options.command === "string" && options.command.trim()
@@ -5057,38 +5094,38 @@ function buildSandboxCreateInput(options: Record<string, string | boolean>): San
   const integrationScopes = parseCsvOption(options.integrationScopes);
   const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
   const requestedAppId = typeof options.appId === "string" ? options.appId.trim() : "";
-  const agentWorkspaceAppId =
-    typeof options.agentWorkspaceAppId === "string"
-      ? options.agentWorkspaceAppId.trim()
+  const sandboxRuntimeAppId =
+    typeof options.runtimeAppId === "string"
+      ? options.runtimeAppId.trim()
       : "";
-  if (requestedAppId && agentWorkspaceAppId && requestedAppId !== agentWorkspaceAppId) {
-    throw new Error("app-id and agent-workspace-app-id must match when both are set");
+  if (requestedAppId && sandboxRuntimeAppId && requestedAppId !== sandboxRuntimeAppId) {
+    throw new Error("app-id and runtime-app-id must match when both are set");
   }
-  const appId = requestedAppId || agentWorkspaceAppId;
-  const agentWorkspaceMode = parseAgentWorkspaceModeOption(options.agentWorkspaceMode);
-  const agentWorkspacePromotionPolicy = parseAgentWorkspacePromotionPolicyOption(
-    options.agentWorkspacePromotionPolicy,
+  const appId = requestedAppId || sandboxRuntimeAppId;
+  const sandboxRuntimeMode = parseSandboxRuntimeModeOption(options.runtimeMode);
+  const sandboxRuntimePromotionPolicy = parseSandboxRuntimePromotionPolicyOption(
+    options.runtimePromotionPolicy,
   );
-  const agentWorkspaceBaseBranch =
-    typeof options.agentWorkspaceBaseBranch === "string" &&
-    options.agentWorkspaceBaseBranch.trim()
-      ? options.agentWorkspaceBaseBranch.trim()
+  const sandboxRuntimeBaseBranch =
+    typeof options.runtimeBaseBranch === "string" &&
+    options.runtimeBaseBranch.trim()
+      ? options.runtimeBaseBranch.trim()
       : "";
-  const agentWorkspaceBaseSha =
-    typeof options.agentWorkspaceBaseSha === "string" && options.agentWorkspaceBaseSha.trim()
-      ? options.agentWorkspaceBaseSha.trim()
+  const sandboxRuntimeBaseSha =
+    typeof options.runtimeBaseSha === "string" && options.runtimeBaseSha.trim()
+      ? options.runtimeBaseSha.trim()
       : "";
-  const agentWorkspaceId =
-    typeof options.agentWorkspaceId === "string" && options.agentWorkspaceId.trim()
-      ? options.agentWorkspaceId.trim()
+  const runtimeId =
+    typeof options.runtimeId === "string" && options.runtimeId.trim()
+      ? options.runtimeId.trim()
       : "";
-  const agentWorkspaceRequested = Boolean(
-    agentWorkspaceMode ||
-      agentWorkspacePromotionPolicy ||
-      agentWorkspaceBaseBranch ||
-      agentWorkspaceBaseSha ||
-      agentWorkspaceId ||
-      agentWorkspaceAppId,
+  const sandboxRuntimeRequested = Boolean(
+    sandboxRuntimeMode ||
+      sandboxRuntimePromotionPolicy ||
+      sandboxRuntimeBaseBranch ||
+      sandboxRuntimeBaseSha ||
+      runtimeId ||
+      sandboxRuntimeAppId,
   );
   const env = parseSandboxEnvOptions(options);
 
@@ -5096,7 +5133,7 @@ function buildSandboxCreateInput(options: Record<string, string | boolean>): San
     throw new Error("integration-capabilities is required with integration-connection");
   }
 
-  return {
+  const sandbox: SandboxCreateInput = {
     ...(repo ? { repo } : {}),
     ...(teamId ? { teamId } : {}),
     ...(appId ? { appId } : {}),
@@ -5141,23 +5178,27 @@ function buildSandboxCreateInput(options: Record<string, string | boolean>): San
           ],
         }
       : {}),
-    ...(agentWorkspaceRequested
+    metadata: {
+      source: "openpond-code",
+    },
+  };
+  return {
+    sandbox,
+    ...(sandboxRuntimeRequested && runtimeId ? { runtimeId } : {}),
+    ...(sandboxRuntimeRequested && !runtimeId
       ? {
-          agentWorkspace: {
-            ...(agentWorkspaceId ? { workspaceId: agentWorkspaceId } : {}),
-            ...(agentWorkspaceMode ? { mode: agentWorkspaceMode } : {}),
+          sandboxRuntime: {
+            ...(teamId ? { teamId } : {}),
+            ...(sandboxRuntimeMode ? { mode: sandboxRuntimeMode } : {}),
             ...(appId ? { appId } : {}),
-            baseBranch: agentWorkspaceBaseBranch || "master",
-            ...(agentWorkspaceBaseSha ? { baseSha: agentWorkspaceBaseSha } : {}),
-            ...(agentWorkspacePromotionPolicy
-              ? { promotionPolicy: agentWorkspacePromotionPolicy }
+            baseBranch: sandboxRuntimeBaseBranch || "master",
+            ...(sandboxRuntimeBaseSha ? { baseSha: sandboxRuntimeBaseSha } : {}),
+            ...(sandboxRuntimePromotionPolicy
+              ? { promotionPolicy: sandboxRuntimePromotionPolicy }
               : {}),
           },
         }
       : {}),
-    metadata: {
-      source: "openpond-code",
-    },
   };
 }
 
@@ -5392,7 +5433,7 @@ function summarizeSandbox(sandbox: SandboxRecord): Record<string, unknown> {
     state: sandbox.state,
     runtimeDriver: sandbox.runtimeDriver,
     repo: sandbox.repo,
-    agentWorkspaceId: sandbox.agentWorkspaceId ?? null,
+    runtimeId: sandbox.runtimeId ?? null,
     repoRef: sandbox.repoRef ?? null,
     sourceCommitSha: sandbox.sourceCommitSha ?? null,
     budgetUsd: sandbox.budget.maxUsd,
@@ -5720,58 +5761,58 @@ async function runSandboxCommand(
     return;
   }
 
-  if (subcommand === "workspace-list") {
+  if (subcommand === "runtime-list") {
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
     const appId = typeof options.appId === "string" ? options.appId.trim() : "";
-    const workspaces = await client.listAgentWorkspaces({
+    const runtimes = await client.listSandboxRuntimes({
       ...(teamId ? { teamId } : {}),
       ...(appId ? { appId } : {}),
     });
-    console.log(JSON.stringify({ workspaces }, null, 2));
+    console.log(JSON.stringify({ runtimes }, null, 2));
     return;
   }
 
-  if (subcommand === "workspace-get") {
-    const workspaceId = rest[1]?.trim();
-    if (!workspaceId) {
-      throw new Error("usage: sandbox workspace-get <workspaceId>");
+  if (subcommand === "runtime-get") {
+    const runtimeId = rest[1]?.trim();
+    if (!runtimeId) {
+      throw new Error("usage: sandbox runtime-get <runtimeId>");
     }
-    const workspace = await client.getAgentWorkspace(workspaceId);
-    console.log(JSON.stringify({ workspace }, null, 2));
+    const runtime = await client.getSandboxRuntime(runtimeId);
+    console.log(JSON.stringify({ runtime }, null, 2));
     return;
   }
 
-  if (subcommand === "workspace-events") {
-    const workspaceId = rest[1]?.trim();
-    if (!workspaceId) {
-      throw new Error("usage: sandbox workspace-events <workspaceId>");
+  if (subcommand === "runtime-events") {
+    const runtimeId = rest[1]?.trim();
+    if (!runtimeId) {
+      throw new Error("usage: sandbox runtime-events <runtimeId>");
     }
-    console.log(JSON.stringify(await client.listAgentWorkspaceEvents(workspaceId), null, 2));
+    console.log(JSON.stringify(await client.listSandboxRuntimeEvents(runtimeId), null, 2));
     return;
   }
 
-  if (subcommand === "workspace-status") {
-    const workspaceId = rest[1]?.trim();
+  if (subcommand === "runtime-status") {
+    const runtimeId = rest[1]?.trim();
     const status =
       typeof options.status === "string" && options.status.trim()
-        ? (options.status.trim() as AgentWorkspaceStatus)
+        ? (options.status.trim() as SandboxRuntimeStatus)
         : "";
     const expectedVersion = Number(options.expectedVersion);
     const summary =
       typeof options.summary === "string" && options.summary.trim()
         ? options.summary.trim()
         : undefined;
-    if (!workspaceId || !status || !Number.isInteger(expectedVersion)) {
+    if (!runtimeId || !status || !Number.isInteger(expectedVersion)) {
       throw new Error(
-        "usage: sandbox workspace-status <workspaceId> --status <status> --expected-version <n>",
+        "usage: sandbox runtime-status <runtimeId> --status <status> --expected-version <n>",
       );
     }
-    const workspace = await client.updateAgentWorkspaceStatus(workspaceId, {
+    const runtime = await client.updateSandboxRuntimeStatus(runtimeId, {
       status,
       expectedVersion,
       ...(summary ? { summary } : {}),
     });
-    console.log(JSON.stringify({ workspace }, null, 2));
+    console.log(JSON.stringify({ runtime }, null, 2));
     return;
   }
 
@@ -5815,8 +5856,8 @@ async function runSandboxCommand(
     return;
   }
 
-  if (subcommand === "workspace-event") {
-    const workspaceId = rest[1]?.trim();
+  if (subcommand === "runtime-event") {
+    const runtimeId = rest[1]?.trim();
     const type =
       typeof options.type === "string" && options.type.trim()
         ? options.type.trim()
@@ -5833,14 +5874,14 @@ async function runSandboxCommand(
       typeof options.lifecycleHint === "string" && options.lifecycleHint.trim()
         ? parseJsonObjectOption(options.lifecycleHint, "lifecycle-hint")
         : undefined;
-    if (!workspaceId || !type) {
+    if (!runtimeId || !type) {
       throw new Error(
-        "usage: sandbox workspace-event <workspaceId> --type <eventType> [--summary <text>] [--payload <json>] [--lifecycle-hint <json>]",
+        "usage: sandbox runtime-event <runtimeId> --type <eventType> [--summary <text>] [--payload <json>] [--lifecycle-hint <json>]",
       );
     }
     console.log(
       JSON.stringify(
-        await client.emitAgentWorkspaceEvent(workspaceId, {
+        await client.emitSandboxRuntimeEvent(runtimeId, {
           type,
           ...(summary ? { summary } : {}),
           ...(payload ? { payload } : {}),
@@ -6400,8 +6441,17 @@ async function runSandboxCommand(
   }
 
   if (subcommand === "create") {
-    const sandbox = await client.create(buildSandboxCreateInput(options));
-    console.log(JSON.stringify({ sandbox: summarizeSandbox(sandbox) }, null, 2));
+    const result = await createSandboxFromPlan(client, buildSandboxCreateInput(options));
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          ...(result.runtime ? { runtime: result.runtime } : {}),
+        },
+        null,
+        2,
+      ),
+    );
     return;
   }
 
@@ -7272,7 +7322,7 @@ async function runSandboxCommand(
   }
 
   throw new Error(
-    "usage: sandbox <list|mcp-config|workspace-list|workspace-get|workspace-events|workspace-status|workspace-event|pricing|costs|secrets|secret-create|secret-rotate|secret-attach|secret-revoke|secret-delete|snapshots|templates|template-launch|snapshot-fork|snapshot-validate|snapshot-publish|create|exec|port|preview|stop|delete|receipts|logs|billing|process-start|process-list|process-get|process-stop|process-stream|pty-start|pty-list|pty-get|pty-write|pty-stop|pty-stream|upload-file|download-file|list-files|search-files|delete-file|stat-file|mkdir|move-file|git-status|git-diff|git-branch|git-commit|git-pull|git-push|smoke> [args]",
+    "usage: sandbox <list|mcp-config|runtime-list|runtime-get|runtime-events|runtime-status|runtime-event|pricing|costs|secrets|secret-create|secret-rotate|secret-attach|secret-revoke|secret-delete|snapshots|templates|template-launch|snapshot-fork|snapshot-validate|snapshot-publish|create|exec|port|preview|stop|delete|receipts|logs|billing|process-start|process-list|process-get|process-stop|process-stream|pty-start|pty-list|pty-get|pty-write|pty-stop|pty-stream|upload-file|download-file|list-files|search-files|delete-file|stat-file|mkdir|move-file|git-status|git-diff|git-branch|git-commit|git-pull|git-push|smoke> [args]",
   );
 }
 
