@@ -103,6 +103,135 @@ describe("sandbox secret CLI output redaction", () => {
     expect(rejected.stderr).toContain("refusing plaintext value for secret-like env FOO_API_KEY");
   });
 
+  test("sandbox create sends low-level agent workspace options", async () => {
+    const requests: CapturedRequest[] = [];
+    await withSandboxApi(requests, async (sandboxApiUrl) => {
+      const result = await runCli([
+        "sandbox",
+        "create",
+        "--agent-workspace-mode",
+        "feature",
+        "--agent-workspace-app-id",
+        "app_test",
+        "--agent-workspace-base-branch",
+        "master",
+        "--agent-workspace-promotion-policy",
+        "manual",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+
+      expect(result.code).toBe(0);
+      expect(requests[0]?.url).toBe("/v1/sandboxes");
+      expect(requests[0]?.body).toMatchObject({
+        appId: "app_test",
+        agentWorkspace: {
+          appId: "app_test",
+          mode: "feature",
+          baseBranch: "master",
+          promotionPolicy: "manual",
+        },
+      });
+      expect("workspacePurpose" in (requests[0]?.body ?? {})).toBe(false);
+    });
+  });
+
+  test("sandbox workspace inspection commands read workspace status and events", async () => {
+    const requests: CapturedRequest[] = [];
+    await withSandboxApi(requests, async (sandboxApiUrl) => {
+      const list = await runCli([
+        "sandbox",
+        "workspace-list",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+      const workspace = await runCli([
+        "sandbox",
+        "workspace-get",
+        "workspace_test",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+      const events = await runCli([
+        "sandbox",
+        "workspace-events",
+        "workspace_test",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+      const eventWrite = await runCli([
+        "sandbox",
+        "workspace-event",
+        "workspace_test",
+        "--type",
+        "workflow.checkpoint_hint",
+        "--summary",
+        "checkpoint",
+        "--payload",
+        "{\"artifact\":\"conversation-state\"}",
+        "--lifecycle-hint",
+        "{\"kind\":\"checkpoint\",\"reason\":\"no_user_reply_timeout\"}",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+      const statusWrite = await runCli([
+        "sandbox",
+        "workspace-status",
+        "workspace_test",
+        "--status",
+        "waiting_for_user",
+        "--expected-version",
+        "2",
+        "--summary",
+        "waiting",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+
+      expect(list.code).toBe(0);
+      expect(workspace.code).toBe(0);
+      expect(events.code).toBe(0);
+      expect(eventWrite.code).toBe(0);
+      expect(statusWrite.code).toBe(0);
+      expect(JSON.parse(list.stdout).workspaces).toContainEqual(
+        expect.objectContaining({
+          id: "workspace_test",
+          status: "waiting_for_user",
+        }),
+      );
+      expect(JSON.parse(workspace.stdout).workspace).toMatchObject({
+        id: "workspace_test",
+        status: "waiting_for_user",
+      });
+      expect(JSON.parse(events.stdout).events).toEqual([
+        expect.objectContaining({
+          type: "workflow.waiting_for_user",
+        }),
+      ]);
+      expect(JSON.parse(eventWrite.stdout).event).toMatchObject({
+        type: "workflow.checkpoint_hint",
+      });
+      expect(JSON.parse(statusWrite.stdout).workspace).toMatchObject({
+        id: "workspace_test",
+        status: "waiting_for_user",
+      });
+      expect(requests.map((request) => request.url)).toContain("/v1/agent-workspaces");
+      expect(requests.map((request) => request.url)).toContain(
+        "/v1/agent-workspaces/workspace_test",
+      );
+      expect(requests.map((request) => request.url)).toContain(
+        "/v1/agent-workspaces/workspace_test/events",
+      );
+      expect(
+        requests.some(
+          (request) =>
+            request.method === "PATCH" &&
+            request.url === "/v1/agent-workspaces/workspace_test/status",
+        ),
+      ).toBe(true);
+    });
+  });
+
   test("created secret refs can be reused to launch a sandbox without echoing plaintext", async () => {
     const requests: CapturedRequest[] = [];
     await withSandboxApi(requests, async (sandboxApiUrl) => {
@@ -416,6 +545,110 @@ describe("sandbox secret CLI output redaction", () => {
       }
     });
   });
+
+  test("sandbox template start sends network, env refs, and agent workspace options", async () => {
+    const requests: CapturedRequest[] = [];
+    await withSandboxApi(requests, async (sandboxApiUrl) => {
+      const projectDir = await mkdtemp(path.join(os.tmpdir(), "openpond-cli-template-agent-"));
+      try {
+        await writeFile(
+          path.join(projectDir, "openpond.yaml"),
+          [
+            "schemaVersion: 1",
+            "name: agent-template-start",
+            "version: 0.0.1",
+            "useCase: sandbox-template-example",
+            "description: Agent workspace template start test.",
+            "runtime:",
+            "  base: node-bun-workspace",
+            "resources:",
+            "  cpu: 1",
+            "  memoryGb: 1",
+            "  diskGb: 4",
+            "start:",
+            "  command: echo ok",
+            "actions: []",
+            "services: []",
+            "validation:",
+            "  commands:",
+            "    - test -f openpond.yaml",
+            "inputs:",
+            "  schema:",
+            "    type: object",
+            "  env:",
+            "    - name: FOO_API_KEY",
+            "      required: true",
+            "      secret: true",
+            "network:",
+            "  egress: allow",
+            "",
+          ].join("\n"),
+          "utf8",
+        );
+
+        const result = await runCli(
+          [
+            "sandbox-template",
+            "start",
+            "--repo",
+            "https://github.com/octocat/Hello-World",
+            "--env-ref",
+            "FOO_API_KEY=openpond://secret/team_test/secret_test#v1",
+            "--agent-workspace-mode",
+            "attempt",
+            "--agent-workspace-app-id",
+            "app_test",
+            "--agent-workspace-base-branch",
+            "master",
+            "--agent-workspace-promotion-policy",
+            "manual",
+            "--sandbox-api-url",
+            sandboxApiUrl,
+          ],
+          "",
+          { cwd: projectDir },
+        );
+
+        expect(result.code).toBe(0);
+        const createRequest = requests.find(
+          (request) =>
+            request.method === "POST" && request.url === "/v1/sandboxes",
+        );
+        expect(createRequest?.body).toMatchObject({
+          appId: "app_test",
+          env: [
+            {
+              name: "FOO_API_KEY",
+              secretRef: "openpond://secret/team_test/secret_test#v1",
+            },
+          ],
+          networkPolicy: {
+            internetEgress: "allow",
+          },
+          agentWorkspace: {
+            appId: "app_test",
+            mode: "attempt",
+            baseBranch: "master",
+            promotionPolicy: "manual",
+          },
+        });
+        const processRequest = requests.find(
+          (request) =>
+            request.method === "POST" &&
+            request.url === "/v1/sandboxes/sandbox_test/processes",
+        );
+        expect(processRequest?.body.command).toContain(
+          "OPENPOND_AGENT_WORKSPACE_ID='workspace_test'",
+        );
+        expect(processRequest?.body.command).toContain(
+          "OPENPOND_SANDBOX_ID='sandbox_test'",
+        );
+        expect(result.stdout).not.toContain(CLI_SECRET);
+      } finally {
+        await rm(projectDir, { recursive: true, force: true });
+      }
+    });
+  });
 });
 
 async function withSandboxApi(
@@ -436,6 +669,91 @@ async function withSandboxApi(
       response.end(
         JSON.stringify({
           secrets: [sandboxSecretRecord({ name: "FOO_API_KEY" })],
+        }),
+      );
+      return;
+    }
+
+    if (request.url === "/v1/agent-workspaces" && request.method === "GET") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ workspaces: [agentWorkspaceRecord()] }));
+      return;
+    }
+
+    if (
+      request.url === "/v1/agent-workspaces/workspace_test" &&
+      request.method === "GET"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ workspace: agentWorkspaceRecord() }));
+      return;
+    }
+
+    if (
+      request.url === "/v1/agent-workspaces/workspace_test/events" &&
+      request.method === "GET"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          events: [
+            {
+              id: "event_test",
+              workspaceId: "workspace_test",
+              sequence: 1,
+              type: "workflow.waiting_for_user",
+              summary: "waiting",
+              actorType: "agent",
+              actorId: "agent_test",
+              payload: {},
+              commitSha: null,
+              snapshotId: null,
+              logRef: null,
+              artifactRefs: [],
+              eventHash: "hash_test",
+              previousEventHash: null,
+              createdAt: "2026-05-20T00:00:00.000Z",
+            },
+          ],
+          nextCursor: null,
+        }),
+      );
+      return;
+    }
+
+    if (
+      request.url === "/v1/agent-workspaces/workspace_test/events" &&
+      request.method === "POST"
+    ) {
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          workspace: agentWorkspaceRecord(),
+          event: {
+            id: "event_written",
+            workspaceId: "workspace_test",
+            sequence: 2,
+            type: body.type,
+            summary: body.summary ?? null,
+            payload: body.payload ?? {},
+            lifecycleHint: body.lifecycleHint ?? null,
+          },
+        }),
+      );
+      return;
+    }
+
+    if (
+      request.url === "/v1/agent-workspaces/workspace_test/status" &&
+      request.method === "PATCH"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          workspace: {
+            ...agentWorkspaceRecord(),
+            status: body.status,
+          },
         }),
       );
       return;
@@ -520,7 +838,13 @@ async function withSandboxApi(
 
     if (request.url === "/v1/sandboxes" && request.method === "POST") {
       response.writeHead(201, { "content-type": "application/json" });
-      response.end(JSON.stringify({ sandbox: sandboxRecord() }));
+      response.end(
+        JSON.stringify({
+          sandbox: sandboxRecord({
+            agentWorkspaceId: body.agentWorkspace ? "workspace_test" : null,
+          }),
+        }),
+      );
       return;
     }
 
@@ -630,7 +954,9 @@ function runCli(args: string[], stdin = "", options: { cwd?: string } = {}): Pro
   });
 }
 
-function sandboxRecord(): Record<string, unknown> {
+function sandboxRecord(
+  overrides: { agentWorkspaceId?: string | null } = {},
+): Record<string, unknown> {
   return {
     id: "sandbox_test",
     state: "running",
@@ -640,6 +966,7 @@ function sandboxRecord(): Record<string, unknown> {
     appId: null,
     visibility: "private",
     ownerUserId: "user_test",
+    agentWorkspaceId: overrides.agentWorkspaceId ?? null,
     billingAccountId: "billing_test",
     resources: { cpu: 1, memoryGb: 1, diskGb: 4 },
     budget: { maxUsd: "0.05" },
@@ -661,6 +988,52 @@ function sandboxRecord(): Record<string, unknown> {
     startedAt: "2026-05-20T00:00:00.000Z",
     stoppedAt: null,
     deletedAt: null,
+  };
+}
+
+function agentWorkspaceRecord(): Record<string, unknown> {
+  return {
+    id: "workspace_test",
+    teamId: "team_test",
+    userId: "user_test",
+    appId: null,
+    sandboxId: "sandbox_test",
+    mode: "attempt",
+    status: "waiting_for_user",
+    baseBranch: "master",
+    baseSha: null,
+    currentSha: null,
+    workspaceRef: null,
+    rootfsSnapshotId: null,
+    dependencySnapshotId: null,
+    checkpointSnapshotIds: [],
+    artifactRefs: [],
+    lifecyclePolicy: {
+      mode: "auto",
+      idleTimeoutSeconds: 900,
+      archiveStoppedAfterSeconds: null,
+      deleteAfterSeconds: null,
+      retentionClass: "ephemeral",
+    },
+    checkpointPolicy: {
+      workflow: "on_idle",
+      source: "if_dirty",
+      rootfs: "if_dirty",
+      volumes: "explicit",
+    },
+    lifecycleState: {
+      status: "waiting_for_user",
+      lastInteractionAt: "2026-05-20T00:00:00.000Z",
+      lastDirtyAt: null,
+      lastCheckpointAt: null,
+      lifecycleReason: "waiting_for_user",
+    },
+    promotionPolicy: "manual",
+    permissions: {},
+    metadata: {},
+    version: 2,
+    createdAt: "2026-05-20T00:00:00.000Z",
+    updatedAt: "2026-05-20T00:00:00.000Z",
   };
 }
 

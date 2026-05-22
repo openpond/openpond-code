@@ -107,6 +107,13 @@ export type SandboxIntegrationLeaseRef = {
   required: boolean;
 };
 
+export type SandboxAgentWorkspaceCreateOptions = Omit<
+  AgentWorkspaceCreateInput,
+  "teamId" | "sandboxId"
+> & {
+  workspaceId?: string;
+};
+
 export type SandboxCreateInput = {
   repo?: string;
   teamId?: string;
@@ -121,6 +128,7 @@ export type SandboxCreateInput = {
   volumes?: SandboxVolumeProvisionInput[];
   integrationLeases?: SandboxIntegrationLeaseInput[];
   integrationConnectionLeases?: SandboxIntegrationConnectionLeaseInput[];
+  agentWorkspace?: SandboxAgentWorkspaceCreateOptions;
   metadata?: Record<string, unknown>;
 };
 
@@ -974,8 +982,11 @@ export type SandboxRecord = {
   state: SandboxState;
   runtimeDriver: SandboxRuntimeDriver;
   repo: string | null;
+  repoRef?: string | null;
+  sourceCommitSha?: string | null;
   teamId: string;
   appId: string | null;
+  agentWorkspaceId?: string | null;
   visibility: "private" | "team";
   ownerUserId: string;
   billingAccountId: string;
