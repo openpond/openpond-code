@@ -581,6 +581,100 @@ export type SandboxFileSearchMatch = {
   preview: string;
 };
 
+export type SandboxPricingRate = {
+  key: "cpu" | "memory" | "disk" | "durable_volume_storage";
+  label: string;
+  unit: string;
+  unitPriceUsd: string;
+  unitPriceHourlyUsd: string;
+  unitPriceMonthlyUsd: string | null;
+};
+
+export type SandboxPublicResourceTierKey =
+  | "tiny"
+  | "small"
+  | "default"
+  | "builder"
+  | "heavy-builder";
+
+export type SandboxKeepRunningEstimateLineItem = {
+  label: string;
+  quantity: number;
+  unit: string;
+  hourlyUsd: string;
+  monthlyUsd: string;
+};
+
+export type SandboxKeepRunningEstimate = {
+  resources: SandboxResources;
+  matchedTierKey: SandboxPublicResourceTierKey | null;
+  hourlyUsd: string;
+  monthlyUsd: string;
+  durationDays: number;
+  pricingSource: "openpond_poc_config";
+  lineItems: SandboxKeepRunningEstimateLineItem[];
+};
+
+export type SandboxPublicResourceTier = {
+  key: SandboxPublicResourceTierKey;
+  label: string;
+  description: string;
+  resources: SandboxResources;
+  goodFit: string[];
+  poorFit: string[];
+  keepRunningEstimate: SandboxKeepRunningEstimate;
+};
+
+export type SandboxPricingRateCard = {
+  currency: "USD";
+  source: "openpond_poc_config";
+  effectiveAt: string;
+  rates: SandboxPricingRate[];
+  tiers: SandboxPublicResourceTier[];
+};
+
+export type SandboxCostLineItemSummary = {
+  label: string;
+  unit: string;
+  quantity: number;
+  amountUsd: string;
+};
+
+export type SandboxCostSandboxSummary = {
+  sandboxId: string;
+  state: SandboxState;
+  repo: string | null;
+  createdAt: string;
+  updatedAt: string;
+  receiptCount: number;
+  totalUsd: string;
+  durationSeconds: number;
+  latestReceiptRef: string | null;
+  latestReceiptAt: string | null;
+};
+
+export type SandboxCostSummary = {
+  teamId: string;
+  ownerUserId: string;
+  pricing: SandboxPricingRateCard;
+  summary: {
+    sandboxCount: number;
+    runningCount: number;
+    stoppedCount: number;
+    archivedCount: number;
+    receiptCount: number;
+    totalUsd: string;
+    totalDurationSeconds: number;
+    activeReservedUsd: string;
+    activeRemainingBudgetUsd: string;
+    activeRunnerSlots: number;
+  };
+  lineItems: SandboxCostLineItemSummary[];
+  sandboxes: SandboxCostSandboxSummary[];
+  recentReceipts: SandboxReceipt[];
+  generatedAt: string;
+};
+
 export type SandboxBillingStatus = {
   sandboxId: string;
   state: SandboxState;
@@ -600,6 +694,7 @@ export type SandboxBillingStatus = {
   lastTickAt: string | null;
   finalizedAt: string | null;
   lastReceiptRef: string | null;
+  keepRunningEstimate?: SandboxKeepRunningEstimate;
 };
 
 export type SandboxReservation = {
@@ -1514,6 +1609,14 @@ export type SandboxFileSearchResponse = {
 export type SandboxBillingStatusResponse = {
   sandbox: SandboxRecord;
   billing: SandboxBillingStatus;
+};
+
+export type SandboxPricingResponse = {
+  pricing: SandboxPricingRateCard;
+};
+
+export type SandboxCostSummaryResponse = {
+  costs: SandboxCostSummary;
 };
 
 export type SandboxSmokeOptions = {
@@ -2735,6 +2838,19 @@ export class OpenPondSandboxClient {
 
   billing(sandboxId: string): Promise<SandboxBillingStatusResponse> {
     return this.request<SandboxBillingStatusResponse>(`/${encodeURIComponent(sandboxId)}/billing`);
+  }
+
+  pricing(): Promise<SandboxPricingResponse> {
+    return this.request<SandboxPricingResponse>("/pricing");
+  }
+
+  costs(input: { teamId?: string; appId?: string } = {}): Promise<SandboxCostSummaryResponse> {
+    const query = new URLSearchParams();
+    if (input.teamId) query.set("teamId", input.teamId);
+    if (input.appId) query.set("appId", input.appId);
+    return this.request<SandboxCostSummaryResponse>(
+      `/costs${query.size > 0 ? `?${query.toString()}` : ""}`,
+    );
   }
 
   integrationLeases(sandboxId: string): Promise<SandboxIntegrationLeasesResponse> {

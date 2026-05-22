@@ -232,6 +232,61 @@ describe("sandbox secret CLI output redaction", () => {
     });
   });
 
+  test("sandbox pricing and costs expose tier and runner slot accounting", async () => {
+    const requests: CapturedRequest[] = [];
+    await withSandboxApi(requests, async (sandboxApiUrl) => {
+      const pricing = await runCli([
+        "sandbox",
+        "pricing",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+      const costs = await runCli([
+        "sandbox",
+        "costs",
+        "--team-id",
+        "team_test",
+        "--summary",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+
+      expect(pricing.code).toBe(0);
+      expect(costs.code).toBe(0);
+      expect(JSON.parse(pricing.stdout).pricing).toMatchObject({
+        currency: "USD",
+        tiers: [
+          expect.objectContaining({
+            key: "default",
+            keepRunningEstimate: expect.objectContaining({
+              monthlyUsd: "41.990400",
+            }),
+          }),
+        ],
+      });
+      expect(JSON.parse(costs.stdout).costs).toMatchObject({
+        teamId: "team_test",
+        summary: {
+          activeRunnerSlots: 1,
+          runningCount: 1,
+          stoppedCount: 2,
+        },
+        lineItems: [
+          expect.objectContaining({
+            label: "vCPU",
+            amountUsd: "0.000042",
+          }),
+        ],
+      });
+      expect(requests.map((request) => request.url)).toContain(
+        "/v1/sandboxes/pricing",
+      );
+      expect(requests.map((request) => request.url)).toContain(
+        "/v1/sandboxes/costs?teamId=team_test",
+      );
+    });
+  });
+
   test("created secret refs can be reused to launch a sandbox without echoing plaintext", async () => {
     const requests: CapturedRequest[] = [];
     await withSandboxApi(requests, async (sandboxApiUrl) => {
@@ -669,6 +724,65 @@ async function withSandboxApi(
       response.end(
         JSON.stringify({
           secrets: [sandboxSecretRecord({ name: "FOO_API_KEY" })],
+        }),
+      );
+      return;
+    }
+
+    if (request.url === "/v1/sandboxes/pricing" && request.method === "GET") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ pricing: sandboxPricingRateCard() }));
+      return;
+    }
+
+    if (
+      request.url === "/v1/sandboxes/costs?teamId=team_test" &&
+      request.method === "GET"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          costs: {
+            teamId: "team_test",
+            ownerUserId: "user_test",
+            pricing: sandboxPricingRateCard(),
+            summary: {
+              sandboxCount: 3,
+              runningCount: 1,
+              stoppedCount: 2,
+              archivedCount: 0,
+              receiptCount: 1,
+              totalUsd: "0.000042",
+              totalDurationSeconds: 42,
+              activeReservedUsd: "0.050000",
+              activeRemainingBudgetUsd: "0.049958",
+              activeRunnerSlots: 1,
+            },
+            lineItems: [
+              {
+                label: "vCPU",
+                unit: "vCPU-second",
+                quantity: 1,
+                amountUsd: "0.000042",
+              },
+            ],
+            sandboxes: [
+              {
+                sandboxId: "sandbox_test",
+                state: "running",
+                repo: null,
+                createdAt: "2026-05-20T00:00:00.000Z",
+                updatedAt: "2026-05-20T00:00:01.000Z",
+                receiptCount: 1,
+                totalUsd: "0.000042",
+                durationSeconds: 42,
+                latestReceiptRef: "receipt_test",
+                latestReceiptAt: "2026-05-20T00:00:01.000Z",
+              },
+            ],
+            recentReceipts: [],
+            generatedAt: "2026-05-20T00:00:01.000Z",
+          },
         }),
       );
       return;
@@ -1112,6 +1226,97 @@ function sandboxScheduleRecord(input: Record<string, unknown>): Record<string, u
     lastRunStatus: null,
     createdAt: "2026-05-20T00:00:00.000Z",
     updatedAt: "2026-05-20T00:00:00.000Z",
+  };
+}
+
+function sandboxPricingRateCard(): Record<string, unknown> {
+  return {
+    currency: "USD",
+    source: "openpond_poc_config",
+    effectiveAt: "2026-05-20T00:00:00.000Z",
+    rates: [
+      {
+        key: "cpu",
+        label: "vCPU",
+        unit: "vCPU-second",
+        unitPriceUsd: "0.000010",
+        unitPriceHourlyUsd: "0.036000",
+        unitPriceMonthlyUsd: null,
+      },
+      {
+        key: "memory",
+        label: "Memory",
+        unit: "GiB-second",
+        unitPriceUsd: "0.000003",
+        unitPriceHourlyUsd: "0.010800",
+        unitPriceMonthlyUsd: null,
+      },
+      {
+        key: "disk",
+        label: "VM disk",
+        unit: "GiB-second",
+        unitPriceUsd: "0.000000",
+        unitPriceHourlyUsd: "0.000072",
+        unitPriceMonthlyUsd: null,
+      },
+      {
+        key: "durable_volume_storage",
+        label: "Durable volume storage",
+        unit: "GiB-second",
+        unitPriceUsd: "0.000000",
+        unitPriceHourlyUsd: "0.000072",
+        unitPriceMonthlyUsd: "0.051840",
+      },
+    ],
+    tiers: [
+      {
+        key: "default",
+        label: "Default",
+        description: "Normal app workspaces, small dev servers, and basic test runs.",
+        resources: {
+          cpu: 1,
+          memoryGb: 2,
+          diskGb: 10,
+        },
+        goodFit: ["normal app workspace"],
+        poorFit: ["large dependency installs"],
+        keepRunningEstimate: {
+          resources: {
+            cpu: 1,
+            memoryGb: 2,
+            diskGb: 10,
+          },
+          matchedTierKey: "default",
+          hourlyUsd: "0.058320",
+          monthlyUsd: "41.990400",
+          durationDays: 30,
+          pricingSource: "openpond_poc_config",
+          lineItems: [
+            {
+              label: "vCPU",
+              quantity: 1,
+              unit: "vCPU",
+              hourlyUsd: "0.036000",
+              monthlyUsd: "25.920000",
+            },
+            {
+              label: "Memory",
+              quantity: 2,
+              unit: "GiB",
+              hourlyUsd: "0.021600",
+              monthlyUsd: "15.552000",
+            },
+            {
+              label: "VM disk",
+              quantity: 10,
+              unit: "GiB",
+              hourlyUsd: "0.000720",
+              monthlyUsd: "0.518400",
+            },
+          ],
+        },
+      },
+    ],
   };
 }
 

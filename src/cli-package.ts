@@ -2959,6 +2959,8 @@ function printHelp(): void {
   console.log("  openpond sandbox workspace-events <workspaceId>");
   console.log("  openpond sandbox workspace-status <workspaceId> --status <status> --expected-version <n>");
   console.log("  openpond sandbox workspace-event <workspaceId> --type <eventType> [--summary <text>] [--payload <json>] [--lifecycle-hint <json>]");
+  console.log("  openpond sandbox pricing");
+  console.log("  openpond sandbox costs [--team-id <id>] [--app-id <id>] [--summary]");
   console.log("  openpond sandbox template-launch [--snapshot-id <id>|--template-name <name>|--use-case <id>] [--version <v>] [--team-id <id>] [--budget-usd 0.05]");
   console.log(
     "  openpond sandbox snapshot-fork <snapshotId> [--team-id <id>] [--app-id <id>] [--budget-usd 0.05]",
@@ -5770,6 +5772,46 @@ async function runSandboxCommand(
     return;
   }
 
+  if (subcommand === "pricing") {
+    const pricing = await client.pricing();
+    console.log(JSON.stringify(pricing, null, 2));
+    return;
+  }
+
+  if (subcommand === "costs") {
+    const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
+    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const costs = await client.costs({
+      ...(teamId ? { teamId } : {}),
+      ...(appId ? { appId } : {}),
+    });
+    if (parseBooleanOption(options.summary)) {
+      console.log(
+        JSON.stringify(
+          {
+            costs: {
+              teamId: costs.costs.teamId,
+              ownerUserId: costs.costs.ownerUserId,
+              generatedAt: costs.costs.generatedAt,
+              summary: costs.costs.summary,
+              lineItems: costs.costs.lineItems,
+              tiers: costs.costs.pricing.tiers.map((tier) => ({
+                key: tier.key,
+                resources: tier.resources,
+                keepRunningEstimate: tier.keepRunningEstimate,
+              })),
+            },
+          },
+          null,
+          2,
+        ),
+      );
+      return;
+    }
+    console.log(JSON.stringify(costs, null, 2));
+    return;
+  }
+
   if (subcommand === "workspace-event") {
     const workspaceId = rest[1]?.trim();
     const type =
@@ -7227,7 +7269,7 @@ async function runSandboxCommand(
   }
 
   throw new Error(
-    "usage: sandbox <list|mcp-config|workspace-list|workspace-get|workspace-events|workspace-status|workspace-event|secrets|secret-create|secret-rotate|secret-attach|secret-revoke|secret-delete|snapshots|templates|template-launch|snapshot-fork|snapshot-validate|snapshot-publish|create|exec|port|preview|stop|delete|receipts|logs|billing|process-start|process-list|process-get|process-stop|process-stream|pty-start|pty-list|pty-get|pty-write|pty-stop|pty-stream|upload-file|download-file|list-files|search-files|delete-file|stat-file|mkdir|move-file|git-status|git-diff|git-branch|git-commit|git-pull|git-push|smoke> [args]",
+    "usage: sandbox <list|mcp-config|workspace-list|workspace-get|workspace-events|workspace-status|workspace-event|pricing|costs|secrets|secret-create|secret-rotate|secret-attach|secret-revoke|secret-delete|snapshots|templates|template-launch|snapshot-fork|snapshot-validate|snapshot-publish|create|exec|port|preview|stop|delete|receipts|logs|billing|process-start|process-list|process-get|process-stop|process-stream|pty-start|pty-list|pty-get|pty-write|pty-stop|pty-stream|upload-file|download-file|list-files|search-files|delete-file|stat-file|mkdir|move-file|git-status|git-diff|git-branch|git-commit|git-pull|git-push|smoke> [args]",
   );
 }
 
