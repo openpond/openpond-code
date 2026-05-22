@@ -2954,7 +2954,7 @@ function printHelp(): void {
   );
   console.log(`  openpond sandbox-template action <sandboxId> <actionName> [--file ${OPENPOND_MANIFEST_FILE_NAME}]`);
   console.log(
-    "  openpond repo create --name <name> [--team-id <id>] [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--env <json>] [--empty|--opentool] [--token] [--auto-schedule-migration <true|false>]",
+    "  openpond repo create --name <name> [--team-id <id>] [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--env <json>] [--empty|--opentool] [--sandbox] [--token] [--auto-schedule-migration <true|false>]",
   );
   console.log("  openpond repo push [--path <dir>] [--branch <branch>]");
   console.log("  openpond organizations list");
@@ -3060,7 +3060,7 @@ function printHelp(): void {
   console.log("  openpond sandbox git-pull <sandboxId> [--remote origin] [--branch main] [--rebase|--ff-only false]");
   console.log("  openpond sandbox git-push <sandboxId> [--remote origin] [--branch main] [--set-upstream] [--force-with-lease]");
   console.log("  openpond sandbox smoke --env staging [--account <profile>] [--keep]");
-  console.log("  openpond apps list [--handle <handle>] [--refresh]");
+  console.log("  openpond apps list [--handle <handle>] [--refresh] [--json]");
   console.log("  openpond apps code-visibility <handle>/<repo> --visibility public|private");
   console.log("  openpond apps tools");
   console.log("  openpond apps deploy <handle>/<repo> [--env preview|production] [--watch]");
@@ -3355,7 +3355,7 @@ async function runRepoCreate(
   const trimmedName = name.trim();
   if (!trimmedName) {
     throw new Error(
-      "usage: repo create --name <name> [--team-id <id>] [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--empty|--opentool] [--token] [--auto-schedule-migration <true|false>]",
+      "usage: repo create --name <name> [--team-id <id>] [--path <dir>] [--template <owner/repo|url>] [--template-branch <branch>] [--empty|--opentool] [--sandbox] [--token] [--auto-schedule-migration <true|false>]",
     );
   }
 
@@ -3495,6 +3495,7 @@ async function runRepoCreate(
   }
 
   const repoInit = options.opentool === "true" ? "opentool" : "empty";
+  const sandbox = parseBooleanOption(options.sandbox);
   const deployOnPush = parseBooleanOption(options.deployOnPush);
   const autoScheduleMigrationOption = options.autoScheduleMigration;
   const autoScheduleMigrationSpecified =
@@ -3509,6 +3510,7 @@ async function runRepoCreate(
     ...(teamId ? { teamId } : {}),
     ...(description ? { description } : {}),
     ...(repoInit ? { repoInit } : {}),
+    ...(sandbox ? { sandbox: true } : {}),
     ...(envVars ? { envVars } : {}),
     ...(deployOnPush ? { deployOnPush: true } : {}),
     ...(autoScheduleMigrationSpecified ? { autoScheduleMigration } : {}),
@@ -3723,14 +3725,19 @@ async function runAppsList(options: Record<string, string | boolean>): Promise<v
     console.log("no apps found");
     return;
   }
+  if (parseBooleanOption(options.json)) {
+    console.log(JSON.stringify({ apps: filtered }, null, 2));
+    return;
+  }
   for (const app of filtered) {
     const owner = app.handle || app.gitOwner || "unknown";
     const repo = app.repo || app.gitRepo || app.id;
     const status = app.latestDeployment?.status || "no-deploy";
     const branch = app.latestDeployment?.gitBranch || app.defaultBranch || "-";
     const codeVisibility = app.codeVisibility || "unknown";
+    const sandbox = app.sandbox ? "yes" : "no";
     console.log(
-      `${owner}/${repo}  ${status}  ${branch}  code=${codeVisibility}  ${app.id}`,
+      `${owner}/${repo}  ${status}  ${branch}  code=${codeVisibility}  sandbox=${sandbox}  ${app.id}`,
     );
   }
 }

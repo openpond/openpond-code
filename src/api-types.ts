@@ -23,6 +23,7 @@ export type CreateRepoRequest = {
   teamId?: string;
   description?: string;
   repoInit?: "opentool" | "empty";
+  sandbox?: boolean;
   templateRepoUrl?: string;
   templateBranch?: string;
   envVars?: Record<string, string>;
