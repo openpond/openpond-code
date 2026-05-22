@@ -251,6 +251,11 @@ describe("sandbox secret CLI output redaction", () => {
         sandbox: { command: "echo ready" },
       });
       const exec = await runtime.commands.run("echo hi");
+      const fileWrite = await runtime.files.write(
+        "src/message.txt",
+        "hello from runtime files",
+      );
+      const fileRead = await runtime.files.read("src/message.txt");
       const waiting = await runtime.waitForUser({
         reason: "awaiting_next_prompt",
       });
@@ -260,6 +265,8 @@ describe("sandbox secret CLI output redaction", () => {
 
       expect(runtime.id).toBe("workspace_test");
       expect(exec.command.command).toBe("echo hi");
+      expect(fileWrite.file.path).toBe("src/message.txt");
+      expect(fileRead).toBe("hello from runtime files");
       expect(waiting.status).toBe("waiting_for_user");
       expect(rawSandbox.runtimeId).toBeNull();
       expect(requests.map((request) => request.url)).toEqual([
@@ -268,6 +275,12 @@ describe("sandbox secret CLI output redaction", () => {
         "/v1/runtimes/workspace_test",
         "/v1/sandboxes/sandbox_test",
         "/v1/sandboxes/sandbox_test/exec",
+        "/v1/runtimes/workspace_test",
+        "/v1/sandboxes/sandbox_test",
+        "/v1/sandboxes/sandbox_test/files",
+        "/v1/runtimes/workspace_test",
+        "/v1/sandboxes/sandbox_test",
+        "/v1/sandboxes/sandbox_test/files?path=src%2Fmessage.txt",
         "/v1/runtimes/workspace_test/events",
         "/v1/runtimes/workspace_test",
         "/v1/sandboxes",
@@ -283,7 +296,10 @@ describe("sandbox secret CLI output redaction", () => {
       expect(requests[4]?.body).toMatchObject({
         command: "echo hi",
       });
-      expect(requests[5]?.body).toMatchObject({
+      expect(requests[7]?.body).toMatchObject({
+        path: "src/message.txt",
+      });
+      expect(requests[11]?.body).toMatchObject({
         type: "workflow.waiting_for_user",
         lifecycleHint: {
           kind: "waiting_for_user",
@@ -1094,6 +1110,28 @@ async function withSandboxApi(
           file: {
             path: body.path,
             sizeBytes: String(body.contentsBase64 ?? "").length,
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        }),
+      );
+      return;
+    }
+
+    if (
+      request.url === "/v1/sandboxes/sandbox_test/files?path=src%2Fmessage.txt" &&
+      request.method === "GET"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          sandbox: sandboxRecord(),
+          file: {
+            path: "src/message.txt",
+            contentsBase64: Buffer.from(
+              "hello from runtime files",
+              "utf-8",
+            ).toString("base64"),
+            sizeBytes: "24",
             updatedAt: "2026-05-20T00:00:00.000Z",
           },
         }),

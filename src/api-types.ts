@@ -124,6 +124,7 @@ export type AppListItem = {
   gitProvider: string | null;
   gitHost: string | null;
   defaultBranch: string | null;
+  sandbox: boolean;
   createdAt: string;
   updatedAt: string;
   teamId: string | null;

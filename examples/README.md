@@ -3,3 +3,6 @@
 These examples use the published `openpond-code` package. Make sure
 `OPENPOND_API_KEY` is set before running them.
 
+- `runtime-vibecode-platform/` shows an app or generic runtime driving a
+  vibecoding flow with file writes, command execution, checkpoint hints, and
+  wait-for-user state.
