@@ -1277,6 +1277,7 @@ export type SandboxAgentResponse = { agent: SandboxAgent };
 export type SandboxAgentRunResponse = {
   agent: SandboxAgent;
   run: SandboxAgentRun;
+  sandbox?: SandboxRecord | null;
 };
 
 export type SandboxRecord = {
@@ -2053,6 +2054,8 @@ export class OpenPondSandboxClient {
     upsert: (input: SandboxProjectUpsertInput) => this.upsertProject(input),
     get: (projectId: string, input: { teamId: string }) =>
       this.getProject(projectId, input),
+    sync: (projectId: string, input: { teamId: string }) =>
+      this.syncProject(projectId, input),
     archive: (projectId: string, input: { teamId: string }) =>
       this.archiveProject(projectId, input),
   };
@@ -2241,6 +2244,17 @@ export class OpenPondSandboxClient {
     const query = new URLSearchParams({ teamId: input.teamId });
     return this.requestApiRoot<SandboxProjectResponse>(
       `/projects/${encodeURIComponent(projectId)}?${query.toString()}`,
+    ).then((payload) => payload.project);
+  }
+
+  syncProject(
+    projectId: string,
+    input: { teamId: string },
+  ): Promise<SandboxProject> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    return this.requestApiRoot<SandboxProjectResponse>(
+      `/projects/${encodeURIComponent(projectId)}/sync?${query.toString()}`,
+      { method: "POST" },
     ).then((payload) => payload.project);
   }
 

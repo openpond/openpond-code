@@ -3034,6 +3034,7 @@ function printHelp(): void {
   console.log("  openpond project list --team-id <id>");
   console.log("  openpond project create --team-id <id> --name <name> [--source-type manual|github_repo|internal_repo|template] [--repo <url>] [--git-owner <owner> --git-repo <repo>] [--internal-repo-path <path>] [--template-repo-url <url>]");
   console.log("  openpond project get <projectId> --team-id <id>");
+  console.log("  openpond project sync <projectId> --team-id <id>");
   console.log("  openpond project archive <projectId> --team-id <id>");
   console.log("  openpond agent list --team-id <id>");
   console.log("  openpond agent create --team-id <id> --project-id <id> --name <name> [--entrypoint-scope entire_manifest|action|service|schedule] [--entrypoint-name <name>] [--trigger-type manual|schedule|endpoint|background] [--runtime-mode <mode>]");
@@ -6093,6 +6094,17 @@ async function runProjectCommand(
       throw new Error("usage: project get <projectId> --team-id <id>");
     }
     const project = await client.projects.get(projectId, { teamId });
+    console.log(JSON.stringify({ project }, null, 2));
+    return;
+  }
+
+  if (subcommand === "sync") {
+    const projectId = rest[1]?.trim();
+    const teamId = requiredTeamId(options, "usage: project sync <projectId>");
+    if (!projectId) {
+      throw new Error("usage: project sync <projectId> --team-id <id>");
+    }
+    const project = await client.projects.sync(projectId, { teamId });
     console.log(JSON.stringify({ project }, null, 2));
     return;
   }
