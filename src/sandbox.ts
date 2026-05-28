@@ -110,7 +110,8 @@ export type SandboxIntegrationLeaseRef = {
 export type SandboxCreateInput = {
   repo?: string;
   teamId?: string;
-  appId?: string;
+  projectId?: string;
+  agentId?: string;
   command?: string;
   visibility?: "private" | "team";
   resources?: Partial<SandboxResources>;
@@ -122,6 +123,10 @@ export type SandboxCreateInput = {
   integrationLeases?: SandboxIntegrationLeaseInput[];
   integrationConnectionLeases?: SandboxIntegrationConnectionLeaseInput[];
   metadata?: Record<string, unknown>;
+};
+
+export type SandboxCreateOptions = {
+  async?: boolean;
 };
 
 export type SandboxScheduleType = "rate" | "cron" | "once";
@@ -163,7 +168,8 @@ export type SandboxScheduleTarget = {
 
 export type SandboxScheduleCreateInput = {
   teamId?: string;
-  appId?: string;
+  projectId?: string;
+  agentId?: string;
   sourceSandboxId?: string;
   snapshotId?: string;
   templateId?: string;
@@ -194,7 +200,7 @@ export type SandboxScheduleCreateInput = {
 };
 
 export type SandboxScheduleUpdateInput = Partial<
-  Omit<SandboxScheduleCreateInput, "teamId" | "appId" | "sourceSandboxId" | "snapshotId" | "templateId">
+  Omit<SandboxScheduleCreateInput, "teamId" | "sourceSandboxId" | "snapshotId" | "templateId">
 > & {
   description?: string | null;
 };
@@ -283,6 +289,10 @@ export type SandboxForkInput = {
   metadata?: Record<string, unknown>;
 };
 
+export type SandboxForkOptions = {
+  async?: boolean;
+};
+
 export type SandboxTemplateLaunchInput = Omit<SandboxForkInput, "snapshotId"> & {
   snapshotId?: string;
   templateName?: string;
@@ -291,12 +301,13 @@ export type SandboxTemplateLaunchInput = Omit<SandboxForkInput, "snapshotId"> & 
   schedules?: SandboxScheduleCreateInput[];
 };
 
-export type SandboxSecretScope = "team" | "app" | "template";
+export type SandboxSecretScope = "team" | "project" | "template";
 export type SandboxSecretStatus = "active" | "revoked" | "deleted";
 export type SandboxSecretAttachmentTarget =
   | "sandbox"
   | "template"
-  | "app"
+  | "project"
+  | "agent"
   | "replay";
 
 export type SandboxSecretAttachmentMetadata = {
@@ -340,7 +351,7 @@ export type SandboxSecretRotateInput = {
 export type SandboxSecretAttachInput = {
   teamId?: string;
   envName: string;
-  targetType: "sandbox" | "template" | "app" | "replay";
+  targetType: SandboxSecretAttachmentTarget;
   targetId: string;
 };
 
@@ -886,6 +897,16 @@ export type SandboxSnapshot = {
   createdAt: string;
 };
 
+export type SandboxSnapshotJob = {
+  id: string;
+  snapshotId: string;
+  name: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  error: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+};
+
 export type SandboxArchiveRef = {
   id: string;
   sandboxId: string;
@@ -902,7 +923,8 @@ export type SandboxSnapshotCatalogEntry = {
   sandboxState: SandboxState;
   sandboxRepo: string | null;
   teamId: string;
-  appId: string | null;
+  projectId?: string | null;
+  agentId?: string | null;
   name: string;
   snapshot: SandboxSnapshot | null;
   archive: SandboxArchiveRef | null;
@@ -927,7 +949,8 @@ export type SandboxTemplateCatalogEntry = {
   sandboxState: SandboxState;
   sandboxRepo: string | null;
   teamId: string;
-  appId: string | null;
+  projectId: string | null;
+  agentId: string | null;
   name: string;
   version: string;
   description: string | null;
@@ -939,7 +962,8 @@ export type SandboxTemplateCatalogEntry = {
     repo: string | null;
     ref: string | null;
     commitSha: string | null;
-    appId: string | null;
+    projectId: string | null;
+    agentId: string | null;
   };
   storageCost?: SandboxSnapshotCatalogEntry["storageCost"];
   replay: SandboxSnapshotReplayManifest;
@@ -962,7 +986,7 @@ export type SandboxTemplateBuildPublishStatus =
 export type SandboxTemplateBuildCreateInput = {
   teamId?: string;
   sourceRepoUrl?: string;
-  sourceAppId?: string;
+  sourceProjectId?: string;
   branch?: string;
   manifestPath?: string;
   publish?: boolean;
@@ -971,7 +995,7 @@ export type SandboxTemplateBuildCreateInput = {
 export type SandboxTemplateBuildRecord = {
   id: string;
   teamId: string;
-  sourceAppId: string | null;
+  sourceProjectId: string | null;
   sourceRepoUrl: string;
   sourceOwner: string;
   sourceRepo: string;
@@ -1064,6 +1088,197 @@ export type OpenPondOrganizationMcpGenerateInput = {
   toolset?: string[] | null;
 };
 
+export type SandboxProjectStatus = "active" | "disabled" | "archived";
+export type SandboxProjectSourceType =
+  | "github_repo"
+  | "internal_repo"
+  | "template"
+  | "manual";
+
+export type SandboxAgentStatus = "active" | "disabled" | "archived";
+export type SandboxAgentWorkflowIntent =
+  | "one_off"
+  | "scheduled"
+  | "code_change"
+  | "evaluation"
+  | "integration_task";
+export type SandboxAgentTriggerType =
+  | "manual"
+  | "schedule"
+  | "endpoint"
+  | "background";
+export type SandboxAgentEntrypointScope =
+  | "entire_manifest"
+  | "start"
+  | "action"
+  | "service"
+  | "schedule";
+export type SandboxAgentRunStatus =
+  | "queued"
+  | "runtime_created"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+export type SandboxAgentSelectedEntrypoint = {
+  scope: SandboxAgentEntrypointScope;
+  name: string | null;
+};
+
+export type SandboxProject = {
+  id: string;
+  teamId: string;
+  createdByUserId: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  status: SandboxProjectStatus;
+  sourceType: SandboxProjectSourceType;
+  sourceConfig: Record<string, unknown>;
+  normalizedSourceIdentity: string;
+  externalId: string | null;
+  gitProvider: string | null;
+  gitHost: string | null;
+  gitOwner: string | null;
+  gitRepo: string | null;
+  gitBranch: string | null;
+  defaultBranch: string | null;
+  internalRepoPath: string | null;
+  templateSourceProjectId: string | null;
+  templateRepoUrl: string | null;
+  templateBranch: string | null;
+  templateRemoteSha: string | null;
+  sandboxManifest: Record<string, unknown> | null;
+  sandboxActionRegistry: Record<string, unknown> | null;
+  sandboxManifestHash: string | null;
+  sandboxManifestPath: string | null;
+  sandboxManifestSyncedAt: string | null;
+  sandboxManifestError: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+};
+
+export type SandboxAgent = {
+  id: string;
+  teamId: string;
+  createdByUserId: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  status: SandboxAgentStatus;
+  projectId: string;
+  workflowIntent: SandboxAgentWorkflowIntent | null;
+  selectedEntrypoint: SandboxAgentSelectedEntrypoint;
+  triggerType: SandboxAgentTriggerType;
+  endpointPolicy: Record<string, unknown>;
+  backgroundTaskPolicy: Record<string, unknown>;
+  defaultRuntimeMode: SandboxRuntimeMode;
+  defaultBranch: string | null;
+  sourceRefOverride: string | null;
+  defaultPromotionPolicy: SandboxRuntimePromotionPolicy;
+  defaultResourcePolicy: Record<string, unknown>;
+  defaultLifecyclePolicy: Record<string, unknown>;
+  defaultCheckpointPolicy: Record<string, unknown>;
+  requiredIntegrationRefs: string[];
+  requiredEnvironmentVariableRefs: string[];
+  schedulePolicy: Record<string, unknown>;
+  externalId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+};
+
+export type SandboxAgentRun = {
+  id: string;
+  teamId: string;
+  projectId: string;
+  agentId: string;
+  requestedByUserId: string;
+  idempotencyKey: string | null;
+  triggerType: SandboxAgentTriggerType;
+  status: SandboxAgentRunStatus;
+  runtimeId: string | null;
+  sandboxId: string | null;
+  selectedEntrypoint: SandboxAgentSelectedEntrypoint;
+  input: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+};
+
+export type SandboxProjectUpsertInput = {
+  teamId: string;
+  name: string;
+  slug?: string | null;
+  description?: string | null;
+  status?: SandboxProjectStatus;
+  sourceType: SandboxProjectSourceType;
+  sourceConfig?: Record<string, unknown>;
+  normalizedSourceIdentity?: string | null;
+  externalId?: string | null;
+  gitProvider?: string | null;
+  gitHost?: string | null;
+  gitOwner?: string | null;
+  gitRepo?: string | null;
+  gitBranch?: string | null;
+  defaultBranch?: string | null;
+  internalRepoPath?: string | null;
+  templateSourceProjectId?: string | null;
+  templateRepoUrl?: string | null;
+  templateBranch?: string | null;
+  templateRemoteSha?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type SandboxAgentUpsertInput = {
+  teamId: string;
+  projectId: string;
+  name: string;
+  slug?: string | null;
+  description?: string | null;
+  status?: SandboxAgentStatus;
+  workflowIntent?: SandboxAgentWorkflowIntent | null;
+  selectedEntrypoint?: Partial<SandboxAgentSelectedEntrypoint> | null;
+  triggerType?: SandboxAgentTriggerType;
+  endpointPolicy?: Record<string, unknown>;
+  backgroundTaskPolicy?: Record<string, unknown>;
+  defaultRuntimeMode?: SandboxRuntimeMode;
+  defaultBranch?: string | null;
+  sourceRefOverride?: string | null;
+  defaultPromotionPolicy?: SandboxRuntimePromotionPolicy;
+  defaultResourcePolicy?: Record<string, unknown>;
+  defaultLifecyclePolicy?: Record<string, unknown>;
+  defaultCheckpointPolicy?: Record<string, unknown>;
+  requiredIntegrationRefs?: string[];
+  requiredEnvironmentVariableRefs?: string[];
+  schedulePolicy?: Record<string, unknown>;
+  externalId?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type SandboxAgentRunInput = {
+  teamId: string;
+  idempotencyKey?: string | null;
+  triggerType?: SandboxAgentTriggerType;
+  input?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  runtimeMode?: SandboxRuntimeMode;
+};
+
+export type SandboxProjectListResponse = { projects: SandboxProject[] };
+export type SandboxProjectResponse = { project: SandboxProject };
+export type SandboxAgentListResponse = { agents: SandboxAgent[] };
+export type SandboxAgentResponse = { agent: SandboxAgent };
+export type SandboxAgentRunResponse = {
+  agent: SandboxAgent;
+  run: SandboxAgentRun;
+};
+
 export type SandboxRecord = {
   id: string;
   state: SandboxState;
@@ -1072,7 +1287,8 @@ export type SandboxRecord = {
   repoRef?: string | null;
   sourceCommitSha?: string | null;
   teamId: string;
-  appId: string | null;
+  projectId: string | null;
+  agentId: string | null;
   runtimeId?: string | null;
   visibility: "private" | "team";
   ownerUserId: string;
@@ -1087,6 +1303,7 @@ export type SandboxRecord = {
   integrationLeases?: SandboxIntegrationLeaseRef[];
   previewPorts: SandboxPreviewPort[];
   snapshots?: SandboxSnapshot[];
+  snapshotJobs?: SandboxSnapshotJob[];
   archive?: SandboxArchiveRef | null;
   receipts: SandboxReceipt[];
   logs: string[];
@@ -1170,7 +1387,8 @@ export type SandboxRuntime = {
   teamId: string;
   ownerUserId: string;
   createdByUserId: string;
-  appId: string | null;
+  projectId: string | null;
+  agentId: string | null;
   mode: SandboxRuntimeMode;
   status: SandboxRuntimeStatus;
   repoId: string | null;
@@ -1217,7 +1435,8 @@ export type SandboxRuntimeEvent = {
 
 export type SandboxRuntimeCreateInput = {
   teamId?: string;
-  appId?: string;
+  projectId?: string;
+  agentId?: string;
   mode?: SandboxRuntimeMode;
   baseBranch?: string;
   baseSha?: string;
@@ -1635,6 +1854,8 @@ export type SandboxSmokeOptions = {
   diskGb?: number;
   keep?: boolean;
   preview?: boolean;
+  snapshot?: boolean;
+  fork?: boolean;
   expectedRuntimeDriver?: SandboxRuntimeDriver;
   expectedMppMode?: NonNullable<SandboxReservation["mpp"]>["mode"];
 };
@@ -1643,11 +1864,13 @@ export type SandboxSmokeSummary = {
   deleted: boolean;
   execOutput: string;
   fileRoundtrip: boolean;
+  forkSandboxId: string | null;
   previewStatus: number | null;
   receiptRefs: Array<string | null>;
   reservationRef: string | null;
   runId: string;
   sandboxId: string;
+  snapshotId: string | null;
   state: SandboxState;
 };
 
@@ -1687,21 +1910,6 @@ export type OpenPondRuntimeCommandsHandle = {
 
 export type OpenPondRuntimePortsHandle = {
   expose(port: number | SandboxOpenPortInput): Promise<SandboxOpenPortResponse>;
-};
-
-export type OpenPondAppRuntimeStartInput = Omit<
-  SandboxRuntimeCreateInput,
-  "appId" | "sandboxId"
-> & {
-  sandbox?: SandboxRuntimeSandboxCreateInput;
-  materialize?: boolean;
-};
-
-export type OpenPondAppRuntimeHandle = {
-  start(input?: OpenPondAppRuntimeStartInput): Promise<OpenPondSandboxRuntimeHandle>;
-  runtime(
-    input?: Omit<SandboxRuntimeCreateInput, "appId">,
-  ): Promise<OpenPondSandboxRuntimeHandle>;
 };
 
 export type RuntimeWorkflowCheckpointHintInput = {
@@ -1793,14 +2001,14 @@ export class OpenPondSandboxClient {
   }
 
   readonly runtimes = {
-    list: (input: { teamId?: string; appId?: string } = {}) =>
+    list: (input: {
+      teamId?: string;
+      projectId?: string;
+      agentId?: string;
+    } = {}) =>
       this.listSandboxRuntimes(input),
     create: (input: SandboxRuntimeCreateInput) =>
       this.createSandboxRuntime(input),
-    createForApp: (
-      appId: string,
-      input: Omit<SandboxRuntimeCreateInput, "appId"> = {},
-    ) => this.createAppSandboxRuntime(appId, input),
     handle: (runtimeId: string, initial: SandboxRuntime | null = null) =>
       this.sandboxRuntime(runtimeId, initial),
     get: (runtimeId: string) => this.getSandboxRuntime(runtimeId),
@@ -1823,40 +2031,52 @@ export class OpenPondSandboxClient {
   };
 
   readonly sandboxes = {
-    list: (input: { teamId?: string; appId?: string } = {}) =>
+    list: (input: {
+      teamId?: string;
+      projectId?: string;
+      agentId?: string;
+    } = {}) =>
       this.list(input),
     create: (input: SandboxCreateInput) => this.create(input),
     get: (sandboxId: string) => this.get(sandboxId),
     pricing: () => this.pricing(),
-    costs: (input: { teamId?: string; appId?: string } = {}) =>
+    costs: (input: {
+      teamId?: string;
+      projectId?: string;
+      agentId?: string;
+    } = {}) =>
       this.costs(input),
   };
 
-  apps(appId: string): OpenPondAppRuntimeHandle {
-    return {
-      runtime: (input = {}) => this.createAppSandboxRuntime(appId, input),
-      start: async (input = {}) => {
-        const { sandbox, materialize = true, ...runtimeInput } = input;
-        const runtime = await this.createSandboxRuntime({
-          ...runtimeInput,
-          appId,
-        });
-        const handle = this.sandboxRuntime(runtime.id, runtime);
-        if (materialize) {
-          await handle.createSandbox({
-            appId,
-            ...(sandbox ?? {}),
-          });
-        }
-        return handle;
-      },
-    };
-  }
+  readonly projects = {
+    list: (input: { teamId: string }) => this.listProjects(input),
+    upsert: (input: SandboxProjectUpsertInput) => this.upsertProject(input),
+    get: (projectId: string, input: { teamId: string }) =>
+      this.getProject(projectId, input),
+    archive: (projectId: string, input: { teamId: string }) =>
+      this.archiveProject(projectId, input),
+  };
 
-  list(input: { teamId?: string; appId?: string } = {}): Promise<SandboxRecord[]> {
+  readonly agents = {
+    list: (input: { teamId: string }) => this.listAgents(input),
+    upsert: (input: SandboxAgentUpsertInput) => this.upsertAgent(input),
+    get: (agentId: string, input: { teamId: string }) =>
+      this.getAgent(agentId, input),
+    archive: (agentId: string, input: { teamId: string }) =>
+      this.archiveAgent(agentId, input),
+    run: (agentId: string, input: SandboxAgentRunInput) =>
+      this.runAgent(agentId, input),
+  };
+
+  list(input: {
+    teamId?: string;
+    projectId?: string;
+    agentId?: string;
+  } = {}): Promise<SandboxRecord[]> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
+    if (input.projectId) query.set("projectId", input.projectId);
+    if (input.agentId) query.set("agentId", input.agentId);
     return this.request<{ sandboxes: SandboxRecord[] }>(
       query.size > 0 ? `?${query.toString()}` : "",
     ).then((payload) => payload.sandboxes);
@@ -1864,11 +2084,9 @@ export class OpenPondSandboxClient {
 
   listSecrets(input: {
     teamId?: string;
-    appId?: string;
   } = {}): Promise<SandboxSecretMetadata[]> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
     return this.requestApiRoot<SandboxSecretListResponse>(
       `/sandbox-secrets${query.size > 0 ? `?${query.toString()}` : ""}`,
     ).then((payload) => payload.secrets);
@@ -1876,11 +2094,10 @@ export class OpenPondSandboxClient {
 
   getSecret(
     secretId: string,
-    input: { teamId?: string; appId?: string } = {},
+    input: { teamId?: string } = {},
   ): Promise<SandboxSecretMetadata> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
     return this.requestApiRoot<SandboxSecretResponse>(
       `/sandbox-secrets/${encodeURIComponent(secretId)}${
         query.size > 0 ? `?${query.toString()}` : ""
@@ -1962,7 +2179,8 @@ export class OpenPondSandboxClient {
   snapshotCatalog(
     input: {
       teamId?: string;
-      appId?: string;
+      projectId?: string;
+      agentId?: string;
       q?: string;
       kind?: "snapshot" | "archive";
       replayState?: "draft" | "validated" | "published";
@@ -1974,7 +2192,8 @@ export class OpenPondSandboxClient {
   ): Promise<SandboxSnapshotCatalogResponse> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
+    if (input.projectId) query.set("projectId", input.projectId);
+    if (input.agentId) query.set("agentId", input.agentId);
     if (input.q) query.set("q", input.q);
     if (input.kind) query.set("kind", input.kind);
     if (input.replayState) query.set("replayState", input.replayState);
@@ -1989,14 +2208,99 @@ export class OpenPondSandboxClient {
 
   listSandboxRuntimes(input: {
     teamId?: string;
-    appId?: string;
+    projectId?: string;
+    agentId?: string;
   } = {}): Promise<SandboxRuntime[]> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
+    if (input.projectId) query.set("projectId", input.projectId);
+    if (input.agentId) query.set("agentId", input.agentId);
     return this.requestApiRoot<SandboxRuntimeListResponse>(
       `/runtimes${query.size > 0 ? `?${query.toString()}` : ""}`,
     ).then((payload) => payload.runtimes);
+  }
+
+  listProjects(input: { teamId: string }): Promise<SandboxProject[]> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    return this.requestApiRoot<SandboxProjectListResponse>(
+      `/projects?${query.toString()}`,
+    ).then((payload) => payload.projects);
+  }
+
+  upsertProject(input: SandboxProjectUpsertInput): Promise<SandboxProject> {
+    return this.requestApiRoot<SandboxProjectResponse>("/projects", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((payload) => payload.project);
+  }
+
+  getProject(
+    projectId: string,
+    input: { teamId: string },
+  ): Promise<SandboxProject> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    return this.requestApiRoot<SandboxProjectResponse>(
+      `/projects/${encodeURIComponent(projectId)}?${query.toString()}`,
+    ).then((payload) => payload.project);
+  }
+
+  archiveProject(
+    projectId: string,
+    input: { teamId: string },
+  ): Promise<SandboxProject> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    return this.requestApiRoot<SandboxProjectResponse>(
+      `/projects/${encodeURIComponent(projectId)}?${query.toString()}`,
+      { method: "DELETE" },
+    ).then((payload) => payload.project);
+  }
+
+  listAgents(input: { teamId: string }): Promise<SandboxAgent[]> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    return this.requestApiRoot<SandboxAgentListResponse>(
+      `/agents?${query.toString()}`,
+    ).then((payload) => payload.agents);
+  }
+
+  upsertAgent(input: SandboxAgentUpsertInput): Promise<SandboxAgent> {
+    return this.requestApiRoot<SandboxAgentResponse>("/agents", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((payload) => payload.agent);
+  }
+
+  getAgent(agentId: string, input: { teamId: string }): Promise<SandboxAgent> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    return this.requestApiRoot<SandboxAgentResponse>(
+      `/agents/${encodeURIComponent(agentId)}?${query.toString()}`,
+    ).then((payload) => payload.agent);
+  }
+
+  archiveAgent(
+    agentId: string,
+    input: { teamId: string },
+  ): Promise<SandboxAgent> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    return this.requestApiRoot<SandboxAgentResponse>(
+      `/agents/${encodeURIComponent(agentId)}?${query.toString()}`,
+      { method: "DELETE" },
+    ).then((payload) => payload.agent);
+  }
+
+  runAgent(
+    agentId: string,
+    input: SandboxAgentRunInput,
+  ): Promise<SandboxAgentRunResponse> {
+    return this.requestApiRoot<SandboxAgentRunResponse>(
+      `/agents/${encodeURIComponent(agentId)}/run`,
+      {
+        method: "POST",
+        headers: {
+          Prefer: "respond-async",
+        },
+        body: JSON.stringify(input),
+      },
+    );
   }
 
   createSandboxRuntime(input: SandboxRuntimeCreateInput): Promise<SandboxRuntime> {
@@ -2004,16 +2308,6 @@ export class OpenPondSandboxClient {
       method: "POST",
       body: JSON.stringify(input),
     }).then((payload) => payload.runtime);
-  }
-
-  createAppSandboxRuntime(
-    appId: string,
-    input: Omit<SandboxRuntimeCreateInput, "appId"> = {},
-  ): Promise<OpenPondSandboxRuntimeHandle> {
-    return this.createSandboxRuntime({
-      ...input,
-      appId,
-    }).then((runtime) => this.sandboxRuntime(runtime.id, runtime));
   }
 
   sandboxRuntime(
@@ -2271,18 +2565,21 @@ export class OpenPondSandboxClient {
 
   forkSnapshot(
     snapshotId: string,
-    input: SandboxForkInput & { teamId?: string; appId?: string } = {},
+    input: SandboxForkInput & { teamId?: string; projectId?: string } = {},
+    options: SandboxForkOptions = {},
   ): Promise<SandboxForkResponse> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
-    const { teamId: _teamId, appId: _appId, ...body } = input;
+    if (input.projectId) query.set("projectId", input.projectId);
+    if (options.async) query.set("async", "1");
+    const { teamId: _teamId, projectId: _projectId, ...body } = input;
     return this.request<SandboxForkResponse>(
       `/catalog/snapshots/${encodeURIComponent(snapshotId)}/fork${
         query.size > 0 ? `?${query.toString()}` : ""
       }`,
       {
         method: "POST",
+        headers: options.async ? { Prefer: "respond-async" } : undefined,
         body: JSON.stringify({
           ...body,
           snapshotId,
@@ -2294,7 +2591,7 @@ export class OpenPondSandboxClient {
   templates(
     input: {
       teamId?: string;
-      appId?: string;
+      projectId?: string;
       q?: string;
       name?: string;
       version?: string;
@@ -2306,7 +2603,7 @@ export class OpenPondSandboxClient {
   ): Promise<SandboxTemplateCatalogResponse> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
+    if (input.projectId) query.set("projectId", input.projectId);
     if (input.q) query.set("q", input.q);
     if (input.name) query.set("name", input.name);
     if (input.version) query.set("version", input.version);
@@ -2320,12 +2617,12 @@ export class OpenPondSandboxClient {
   }
 
   launchTemplate(
-    input: SandboxTemplateLaunchInput & { teamId?: string; appId?: string },
+    input: SandboxTemplateLaunchInput & { teamId?: string; projectId?: string },
   ): Promise<SandboxTemplateLaunchResponse> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
-    const { teamId: _teamId, appId: _appId, ...body } = input;
+    if (input.projectId) query.set("projectId", input.projectId);
+    const { teamId: _teamId, projectId: _projectId, ...body } = input;
     return this.request<SandboxTemplateLaunchResponse>(
       `/templates/launch${query.size > 0 ? `?${query.toString()}` : ""}`,
       {
@@ -2337,12 +2634,12 @@ export class OpenPondSandboxClient {
 
   listSchedules(input: {
     teamId?: string;
-    appId?: string;
+    projectId?: string;
     sourceSandboxId?: string;
   } = {}): Promise<SandboxScheduleListResponse> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
+    if (input.projectId) query.set("projectId", input.projectId);
     if (input.sourceSandboxId) query.set("sourceSandboxId", input.sourceSandboxId);
     return this.request<SandboxScheduleListResponse>(
       `/schedules${query.size > 0 ? `?${query.toString()}` : ""}`,
@@ -2351,8 +2648,8 @@ export class OpenPondSandboxClient {
 
   createSchedule(input: SandboxScheduleCreateInput): Promise<SandboxScheduleResponse> {
     const query = new URLSearchParams();
-    if (input.appId) query.set("appId", input.appId);
-    const { appId: _appId, ...body } = input;
+    if (input.projectId) query.set("projectId", input.projectId);
+    const { projectId: _projectId, ...body } = input;
     return this.request<SandboxScheduleResponse>(
       `/schedules${query.size > 0 ? `?${query.toString()}` : ""}`,
       {
@@ -2557,11 +2854,11 @@ export class OpenPondSandboxClient {
     ).then((payload) => payload.mcpServer);
   }
 
-  startReplay(input: SandboxReplayInput & { teamId?: string; appId?: string }): Promise<SandboxReplayResponse> {
+  startReplay(input: SandboxReplayInput & { teamId?: string; projectId?: string }): Promise<SandboxReplayResponse> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
-    const { teamId: _teamId, appId: _appId, ...body } = input;
+    if (input.projectId) query.set("projectId", input.projectId);
+    const { teamId: _teamId, projectId: _projectId, ...body } = input;
     return this.requestApiRoot<SandboxReplayResponse>(
       `/sandbox-replays${query.size > 0 ? `?${query.toString()}` : ""}`,
       {
@@ -2571,19 +2868,19 @@ export class OpenPondSandboxClient {
     );
   }
 
-  listReplays(input: { teamId?: string; appId?: string } = {}): Promise<SandboxReplayListResponse> {
+  listReplays(input: { teamId?: string; projectId?: string } = {}): Promise<SandboxReplayListResponse> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
+    if (input.projectId) query.set("projectId", input.projectId);
     return this.requestApiRoot<SandboxReplayListResponse>(
       `/sandbox-replays${query.size > 0 ? `?${query.toString()}` : ""}`,
     );
   }
 
-  getReplay(replayId: string, input: { teamId?: string; appId?: string } = {}): Promise<SandboxReplayResponse> {
+  getReplay(replayId: string, input: { teamId?: string; projectId?: string } = {}): Promise<SandboxReplayResponse> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
+    if (input.projectId) query.set("projectId", input.projectId);
     return this.requestApiRoot<SandboxReplayResponse>(
       `/sandbox-replays/${encodeURIComponent(replayId)}${
         query.size > 0 ? `?${query.toString()}` : ""
@@ -2593,11 +2890,11 @@ export class OpenPondSandboxClient {
 
   getReplayLogs(
     replayId: string,
-    input: { teamId?: string; appId?: string } = {},
+    input: { teamId?: string; projectId?: string } = {},
   ): Promise<SandboxReplayLogsResponse> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
+    if (input.projectId) query.set("projectId", input.projectId);
     return this.requestApiRoot<SandboxReplayLogsResponse>(
       `/sandbox-replays/${encodeURIComponent(replayId)}/logs${
         query.size > 0 ? `?${query.toString()}` : ""
@@ -2607,11 +2904,11 @@ export class OpenPondSandboxClient {
 
   getReplayArtifacts(
     replayId: string,
-    input: { teamId?: string; appId?: string } = {},
+    input: { teamId?: string; projectId?: string } = {},
   ): Promise<SandboxReplayArtifactsResponse> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
+    if (input.projectId) query.set("projectId", input.projectId);
     return this.requestApiRoot<SandboxReplayArtifactsResponse>(
       `/sandbox-replays/${encodeURIComponent(replayId)}/artifacts${
         query.size > 0 ? `?${query.toString()}` : ""
@@ -2619,10 +2916,10 @@ export class OpenPondSandboxClient {
     );
   }
 
-  cancelReplay(replayId: string, input: { teamId?: string; appId?: string } = {}): Promise<SandboxReplayResponse> {
+  cancelReplay(replayId: string, input: { teamId?: string; projectId?: string } = {}): Promise<SandboxReplayResponse> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
+    if (input.projectId) query.set("projectId", input.projectId);
     return this.requestApiRoot<SandboxReplayResponse>(
       `/sandbox-replays/${encodeURIComponent(replayId)}/cancel${
         query.size > 0 ? `?${query.toString()}` : ""
@@ -2636,13 +2933,15 @@ export class OpenPondSandboxClient {
   integrationConnections(
     input: {
       teamId?: string;
-      appId?: string;
+      projectId?: string;
+      agentId?: string;
       status?: SandboxIntegrationConnectionStatusFilter;
     } = {},
   ): Promise<SandboxIntegrationConnectionsResponse> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
+    if (input.projectId) query.set("projectId", input.projectId);
+    if (input.agentId) query.set("agentId", input.agentId);
     if (input.status) query.set("status", input.status);
     return this.requestApiRoot<SandboxIntegrationConnectionsResponse>(
       `/integrations/connections${query.size > 0 ? `?${query.toString()}` : ""}`,
@@ -2660,9 +2959,10 @@ export class OpenPondSandboxClient {
     };
   }
 
-  create(input: SandboxCreateInput): Promise<SandboxRecord> {
+  create(input: SandboxCreateInput, options: SandboxCreateOptions = {}): Promise<SandboxRecord> {
     return this.request<SandboxCreateResponse>("", {
       method: "POST",
+      headers: options.async ? { Prefer: "respond-async" } : undefined,
       body: JSON.stringify(input),
     }).then((payload) => payload.sandbox);
   }
@@ -3161,10 +3461,15 @@ export class OpenPondSandboxClient {
     return this.request<SandboxPricingResponse>("/pricing");
   }
 
-  costs(input: { teamId?: string; appId?: string } = {}): Promise<SandboxCostSummaryResponse> {
+  costs(input: {
+    teamId?: string;
+    projectId?: string;
+    agentId?: string;
+  } = {}): Promise<SandboxCostSummaryResponse> {
     const query = new URLSearchParams();
     if (input.teamId) query.set("teamId", input.teamId);
-    if (input.appId) query.set("appId", input.appId);
+    if (input.projectId) query.set("projectId", input.projectId);
+    if (input.agentId) query.set("agentId", input.agentId);
     return this.request<SandboxCostSummaryResponse>(
       `/costs${query.size > 0 ? `?${query.toString()}` : ""}`,
     );
@@ -3209,28 +3514,35 @@ export class OpenPondSandboxClient {
     const expectedFile = `openpond-code-file-ok:${runId}`;
     const previewPort = 4173;
     let sandboxId: string | null = null;
+    let forkSandboxId: string | null = null;
     let deleted = false;
+    let forkDeleted = false;
 
     try {
-      const sandbox = await this.create({
-        repo: options.repo ?? "https://github.com/octocat/Hello-World",
-        resources: {
-          cpu: options.cpu ?? 1,
-          memoryGb: options.memoryGb ?? 1,
-          diskGb: options.diskGb ?? 8,
-        },
-        budget: { maxUsd: options.budgetUsd ?? "0.05" },
-        quotas: {
-          maxSpendUsd: options.budgetUsd ?? "0.05",
-          maxDurationSeconds: 600,
-          idleTimeoutSeconds: 600,
-          maxOpenPorts: 2,
-        },
-        metadata: {
-          runId,
-          source: "openpond-code-sandbox-smoke",
-        },
-      });
+      const sandbox = await this.waitForCreateReady(
+        await this.create(
+          {
+            repo: options.repo ?? "https://github.com/octocat/Hello-World",
+            resources: {
+              cpu: options.cpu ?? 1,
+              memoryGb: options.memoryGb ?? 1,
+              diskGb: options.diskGb ?? 8,
+            },
+            budget: { maxUsd: options.budgetUsd ?? "0.05" },
+            quotas: {
+              maxSpendUsd: options.budgetUsd ?? "0.05",
+              maxDurationSeconds: 600,
+              idleTimeoutSeconds: 600,
+              maxOpenPorts: 2,
+            },
+            metadata: {
+              runId,
+              source: "openpond-code-sandbox-smoke",
+            },
+          },
+          { async: true },
+        ),
+      );
       sandboxId = sandbox.id;
 
       const expectedRuntimeDriver = options.expectedRuntimeDriver ?? "remote-firecracker";
@@ -3238,11 +3550,14 @@ export class OpenPondSandboxClient {
         throw new Error(`expected ${expectedRuntimeDriver}, got ${sandbox.runtimeDriver}`);
       }
 
-      const expectedMppMode = options.expectedMppMode ?? "mpp_service_hook";
-      if (sandbox.reservation.mpp?.mode !== expectedMppMode) {
+      const expectedMppMode = options.expectedMppMode;
+      if (expectedMppMode && sandbox.reservation.mpp?.mode !== expectedMppMode) {
         throw new Error(
           `expected ${expectedMppMode} reservation, got ${sandbox.reservation.mpp?.mode ?? "none"}`,
         );
+      }
+      if (!expectedMppMode && !sandbox.reservation.mpp?.mode) {
+        throw new Error("expected sandbox reservation MPP metadata");
       }
 
       const exec = await this.exec(sandbox.id, {
@@ -3267,6 +3582,88 @@ export class OpenPondSandboxClient {
       const downloaded = await this.downloadFile(sandbox.id, "openpond-code-smoke.txt");
       if (downloaded !== expectedFile) {
         throw new Error("expected file roundtrip marker");
+      }
+
+      let snapshotId: string | null = null;
+      if (options.snapshot || options.fork) {
+        const snapshotResponse = (await this.createSnapshot(sandbox.id, {
+          async: true,
+          name: `openpond-code-smoke-${runId}`,
+          replay: {
+            entrypoints: [
+              {
+                command: "cat openpond-code-smoke.txt",
+                name: "default",
+              },
+            ],
+            retention: {
+              class: "pinned",
+            },
+            safety: {
+              cleanup: "delete",
+              idleTimeoutSeconds: 600,
+              internetEgress: "block",
+              maxDurationSeconds: 600,
+              maxSpendUsd: options.budgetUsd ?? "0.05",
+              publicPreview: false,
+            },
+            validation: {
+              commands: [
+                {
+                  command: "test -f openpond-code-smoke.txt",
+                },
+              ],
+            },
+          },
+        })) as SandboxSnapshotResponse & {
+          snapshotJob?: { snapshotId?: string; status?: string; error?: string | null };
+        };
+        const snapshot =
+          snapshotResponse.snapshot ??
+          (
+            await this.waitForSnapshotReady(
+            sandbox.id,
+            snapshotResponse.snapshotJob?.snapshotId,
+            )
+          ).snapshot;
+        snapshotId = snapshot.id;
+        if (snapshot.state !== "ready") {
+          throw new Error(
+            `expected ready snapshot, got ${snapshot.state}`,
+          );
+        }
+      }
+
+      if (options.fork) {
+        if (!snapshotId) {
+          throw new Error("expected snapshot id before fork");
+        }
+        const forked = await this.waitForCreateReady(
+          (
+            await this.forkSnapshot(snapshotId, {
+              budget: { maxUsd: options.budgetUsd ?? "0.05" },
+              metadata: {
+                source: "openpond-code-sandbox-smoke-fork",
+                templateSnapshotId: snapshotId,
+              },
+            }, { async: true })
+          ).sandbox,
+        );
+        forkSandboxId = forked.id;
+        const forkExec = await this.exec(forked.id, {
+          command: "cat openpond-code-smoke.txt",
+          timeoutSeconds: 120,
+        });
+        if (forkExec.command.status !== "succeeded") {
+          throw new Error(`expected fork command success, got ${forkExec.command.status}`);
+        }
+        if (!forkExec.command.output.includes(expectedFile)) {
+          throw new Error("expected fork snapshot marker");
+        }
+        if (!options.keep) {
+          await this.delete(forked.id);
+          forkDeleted = true;
+        }
       }
 
       let previewStatus: number | null = null;
@@ -3305,14 +3702,19 @@ export class OpenPondSandboxClient {
         deleted,
         execOutput: exec.command.output.trim(),
         fileRoundtrip: true,
+        forkSandboxId,
         previewStatus,
         receiptRefs: receipts.map((receipt) => receipt.mpp.receiptRef ?? null),
         reservationRef: sandbox.reservation.mpp?.reservationRef ?? null,
         runId,
         sandboxId: sandbox.id,
+        snapshotId,
         state: readback.state,
       };
     } finally {
+      if (forkSandboxId && !options.keep && !forkDeleted) {
+        await this.delete(forkSandboxId).catch(() => undefined);
+      }
       if (sandboxId && !options.keep && !deleted) {
         await this.delete(sandboxId).catch(() => undefined);
       }
@@ -3328,6 +3730,64 @@ export class OpenPondSandboxClient {
     const response = await apiFetch(this.apiRootUrl, this.apiKey, path, init);
     return readApiJson<T>(response, "OpenPond API request");
   }
+
+  private async waitForCreateReady(sandbox: SandboxRecord): Promise<SandboxRecord> {
+    if (sandbox.state === "running" || sandbox.state === "stopped") {
+      return sandbox;
+    }
+    if (sandbox.state === "error") {
+      throw new Error(`sandbox create failed: ${sandbox.id}\n${sandbox.logs.join("\n")}`);
+    }
+
+    const timeoutMs = 12 * 60_000;
+    const pollMs = 3_000;
+    const deadline = Date.now() + timeoutMs;
+    let latest = sandbox;
+    while (Date.now() < deadline) {
+      await sleep(pollMs);
+      latest = await this.get(sandbox.id);
+      if (latest.state === "running" || latest.state === "stopped") {
+        return latest;
+      }
+      if (latest.state === "error") {
+        throw new Error(`sandbox create failed: ${latest.id}\n${latest.logs.join("\n")}`);
+      }
+    }
+
+    throw new Error(
+      `sandbox create did not reach running state before timeout: ${latest.id} (${latest.state})`,
+    );
+  }
+
+  private async waitForSnapshotReady(
+    sandboxId: string,
+    snapshotId?: string,
+  ): Promise<SandboxSnapshotResponse> {
+    if (!snapshotId) {
+      throw new Error("snapshot job did not return snapshot id");
+    }
+    const timeoutMs = 12 * 60_000;
+    const pollMs = 3_000;
+    const deadline = Date.now() + timeoutMs;
+    let latest = await this.get(sandboxId);
+    while (Date.now() < deadline) {
+      const snapshot = latest.snapshots?.find((item) => item.id === snapshotId);
+      if (snapshot?.state === "ready") {
+        return { sandbox: latest, snapshot };
+      }
+      const job = latest.snapshotJobs?.find((item) => item.snapshotId === snapshotId);
+      if (job?.status === "failed") {
+        throw new Error(`snapshot job failed: ${job.error ?? snapshotId}`);
+      }
+      await sleep(pollMs);
+      latest = await this.get(sandboxId);
+    }
+    throw new Error(`snapshot did not reach ready state before timeout: ${snapshotId}`);
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function createOpenPondSandboxClient(
@@ -3352,13 +3812,20 @@ export function normalizeSandboxApiUrl(baseUrlOrApiUrl: string): string {
   if (normalizedPath.endsWith("/v1")) {
     return `${url.origin}${normalizedPath}/sandboxes`;
   }
-  if (url.hostname === "api.openpond.ai" || url.hostname.startsWith("api.")) {
+  if (isOpenPondHostedApiHost(url.hostname)) {
     return `${url.origin}${normalizedPath}/v1/sandboxes`;
   }
   if (url.origin === DEFAULT_OPENPOND_WEB_BASE_URL) {
     return `${DEFAULT_OPENPOND_API_BASE_URL}/v1/sandboxes`;
   }
   return `${url.origin}${normalizedPath}/api/sandboxes`;
+}
+
+function isOpenPondHostedApiHost(hostname: string): boolean {
+  return (
+    hostname === "api.openpond.ai" ||
+    (hostname.startsWith("api") && hostname.endsWith(".openpond.ai"))
+  );
 }
 
 function apiRootUrlFromSandboxApiUrl(sandboxApiUrl: string): string {

@@ -113,8 +113,10 @@ describe("sandbox secret CLI output redaction", () => {
         "create",
         "--runtime-mode",
         "feature",
-        "--runtime-app-id",
-        "app_test",
+        "--runtime-project-id",
+        "project_test",
+        "--runtime-agent-id",
+        "agent_test",
         "--runtime-base-branch",
         "master",
         "--runtime-promotion-policy",
@@ -129,16 +131,185 @@ describe("sandbox secret CLI output redaction", () => {
         "/v1/runtimes/workspace_test/sandbox",
       ]);
       expect(requests[0]?.body).toMatchObject({
-        appId: "app_test",
+        projectId: "project_test",
+        agentId: "agent_test",
         mode: "feature",
         baseBranch: "master",
         promotionPolicy: "manual",
       });
       expect(requests[1]?.body).toMatchObject({
-        appId: "app_test",
+        projectId: "project_test",
+        agentId: "agent_test",
       });
       expect("sandboxRuntime" in (requests[1]?.body ?? {})).toBe(false);
       expect("workspacePurpose" in (requests[0]?.body ?? {})).toBe(false);
+    });
+  });
+
+  test("project and agent commands use first-class sandbox API resources", async () => {
+    const requests: CapturedRequest[] = [];
+    await withSandboxApi(requests, async (sandboxApiUrl) => {
+      const projectList = await runCli([
+        "project",
+        "list",
+        "--team-id",
+        "team_test",
+        "--json",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+      const projectCreate = await runCli([
+        "project",
+        "create",
+        "--team-id",
+        "team_test",
+        "--name",
+        "Demo Project",
+        "--source-type",
+        "internal_repo",
+        "--git-owner",
+        "openpond",
+        "--git-repo",
+        "demo-project",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+      const agentCreate = await runCli([
+        "agent",
+        "create",
+        "--team-id",
+        "team_test",
+        "--project-id",
+        "project_test",
+        "--name",
+        "Daily Report",
+        "--entrypoint-scope",
+        "action",
+        "--entrypoint-name",
+        "hello",
+        "--trigger-type",
+        "manual",
+        "--runtime-mode",
+        "attempt",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+      const agentRun = await runCli([
+        "agent",
+        "run",
+        "agent_test",
+        "--team-id",
+        "team_test",
+        "--idempotency-key",
+        "run_key",
+        "--input",
+        '{"message":"hello"}',
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+
+      expect(projectList.code).toBe(0);
+      expect(projectCreate.code).toBe(0);
+      expect(agentCreate.code).toBe(0);
+      expect(agentRun.code).toBe(0);
+      expect(JSON.parse(projectList.stdout).projects[0]).toMatchObject({
+        id: "project_test",
+        teamId: "team_test",
+      });
+      expect(JSON.parse(projectCreate.stdout).project).toMatchObject({
+        id: "project_test",
+        sourceType: "internal_repo",
+      });
+      expect(JSON.parse(agentCreate.stdout).agent).toMatchObject({
+        id: "agent_test",
+        projectId: "project_test",
+        selectedEntrypoint: { scope: "action", name: "hello" },
+      });
+      expect(JSON.parse(agentRun.stdout).run).toMatchObject({
+        id: "agent_run_test",
+        agentId: "agent_test",
+        runtimeId: "workspace_test",
+      });
+      expect(requests.map((request) => request.url)).toEqual([
+        "/v1/projects?teamId=team_test",
+        "/v1/projects",
+        "/v1/agents",
+        "/v1/agents/agent_test/run",
+      ]);
+      expect(requests[1]?.body).toMatchObject({
+        teamId: "team_test",
+        name: "Demo Project",
+        sourceType: "internal_repo",
+        gitOwner: "openpond",
+        gitRepo: "demo-project",
+      });
+      expect(requests[2]?.body).toMatchObject({
+        teamId: "team_test",
+        projectId: "project_test",
+        selectedEntrypoint: { scope: "action", name: "hello" },
+      });
+      expect(requests[3]?.body).toMatchObject({
+        teamId: "team_test",
+        idempotencyKey: "run_key",
+        input: { message: "hello" },
+      });
+    });
+  });
+
+  test("sdk exposes project and agent handles without requiring app ids", async () => {
+    const requests: CapturedRequest[] = [];
+    await withSandboxApi(requests, async (sandboxApiUrl) => {
+      const client = createOpenPondSandboxClient({
+        apiKey: "opk_test_cli",
+        sandboxApiUrl,
+      });
+
+      const project = await client.projects.upsert({
+        teamId: "team_test",
+        name: "SDK Project",
+        sourceType: "manual",
+      });
+      const projectAgain = await client.projects.upsert({
+        teamId: "team_test",
+        name: "SDK Project",
+        sourceType: "manual",
+      });
+      const agent = await client.agents.upsert({
+        teamId: "team_test",
+        projectId: project.id,
+        name: "SDK Agent",
+        selectedEntrypoint: { scope: "entire_manifest" },
+      });
+      const agentAgain = await client.agents.upsert({
+        teamId: "team_test",
+        projectId: project.id,
+        name: "SDK Agent",
+        selectedEntrypoint: { scope: "entire_manifest" },
+      });
+      const result = await client.agents.run(agent.id, {
+        teamId: "team_test",
+        idempotencyKey: "sdk_run",
+      });
+
+      expect(project).toMatchObject({ id: "project_test", teamId: "team_test" });
+      expect(projectAgain.id).toBe(project.id);
+      expect(agent).toMatchObject({ id: "agent_test", projectId: "project_test" });
+      expect(agentAgain.id).toBe(agent.id);
+      expect(result.run).toMatchObject({
+        id: "agent_run_test",
+        agentId: "agent_test",
+      });
+      expect(requests.map((request) => request.url)).toEqual([
+        "/v1/projects",
+        "/v1/projects",
+        "/v1/agents",
+        "/v1/agents",
+        "/v1/agents/agent_test/run",
+      ]);
+      expect(requests[0]?.body).not.toHaveProperty("appId");
+      expect(requests[1]?.body).not.toHaveProperty("appId");
+      expect(requests[2]?.body).not.toHaveProperty("appId");
+      expect(requests[3]?.body).not.toHaveProperty("appId");
     });
   });
 
@@ -238,7 +409,7 @@ describe("sandbox secret CLI output redaction", () => {
     });
   });
 
-  test("sdk app runtime helpers materialize and resume attached sandboxes", async () => {
+  test("sdk project runtime helpers materialize and resume attached sandboxes", async () => {
     const requests: CapturedRequest[] = [];
     await withSandboxApi(requests, async (sandboxApiUrl) => {
       const client = createOpenPondSandboxClient({
@@ -246,9 +417,16 @@ describe("sandbox secret CLI output redaction", () => {
         sandboxApiUrl,
       });
 
-      const runtime = await client.apps("app_test").start({
+      const createdRuntime = await client.runtimes.create({
+        projectId: "project_test",
+        agentId: "agent_test",
         mode: "feature",
-        sandbox: { command: "echo ready" },
+      });
+      const runtime = client.runtimes.handle(createdRuntime.id, createdRuntime);
+      await runtime.createSandbox({
+        projectId: "project_test",
+        agentId: "agent_test",
+        command: "echo ready",
       });
       const exec = await runtime.commands.run("echo hi");
       const fileWrite = await runtime.files.write(
@@ -286,11 +464,13 @@ describe("sandbox secret CLI output redaction", () => {
         "/v1/sandboxes",
       ]);
       expect(requests[0]?.body).toMatchObject({
-        appId: "app_test",
+        projectId: "project_test",
+        agentId: "agent_test",
         mode: "feature",
       });
       expect(requests[1]?.body).toMatchObject({
-        appId: "app_test",
+        projectId: "project_test",
+        agentId: "agent_test",
         command: "echo ready",
       });
       expect(requests[4]?.body).toMatchObject({
@@ -728,8 +908,10 @@ describe("sandbox secret CLI output redaction", () => {
             "FOO_API_KEY=openpond://secret/team_test/secret_test#v1",
             "--runtime-mode",
             "attempt",
-            "--runtime-app-id",
-            "app_test",
+            "--runtime-project-id",
+            "project_test",
+            "--runtime-agent-id",
+            "agent_test",
             "--runtime-base-branch",
             "master",
             "--runtime-promotion-policy",
@@ -747,7 +929,8 @@ describe("sandbox secret CLI output redaction", () => {
             request.method === "POST" && request.url === "/v1/runtimes",
         );
         expect(workspaceRequest?.body).toMatchObject({
-          appId: "app_test",
+          projectId: "project_test",
+          agentId: "agent_test",
           mode: "attempt",
           baseBranch: "master",
           promotionPolicy: "manual",
@@ -758,7 +941,8 @@ describe("sandbox secret CLI output redaction", () => {
             request.url === "/v1/runtimes/workspace_test/sandbox",
         );
         expect(createRequest?.body).toMatchObject({
-          appId: "app_test",
+          projectId: "project_test",
+          agentId: "agent_test",
           env: [
             {
               name: "FOO_API_KEY",
@@ -866,6 +1050,107 @@ async function withSandboxApi(
             recentReceipts: [],
             generatedAt: "2026-05-20T00:00:01.000Z",
           },
+        }),
+      );
+      return;
+    }
+
+    if (request.url === "/v1/projects?teamId=team_test" && request.method === "GET") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ projects: [sandboxProjectRecord()] }));
+      return;
+    }
+
+    if (request.url === "/v1/projects" && request.method === "POST") {
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          project: sandboxProjectRecord({
+            name: String(body.name ?? "Demo Project"),
+            sourceType: String(body.sourceType ?? "manual"),
+            gitOwner: typeof body.gitOwner === "string" ? body.gitOwner : null,
+            gitRepo: typeof body.gitRepo === "string" ? body.gitRepo : null,
+          }),
+        }),
+      );
+      return;
+    }
+
+    if (
+      request.url === "/v1/projects/project_test?teamId=team_test" &&
+      request.method === "GET"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ project: sandboxProjectRecord() }));
+      return;
+    }
+
+    if (
+      request.url === "/v1/projects/project_test?teamId=team_test" &&
+      request.method === "DELETE"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          project: sandboxProjectRecord({ status: "archived" }),
+        }),
+      );
+      return;
+    }
+
+    if (request.url === "/v1/agents?teamId=team_test" && request.method === "GET") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ agents: [sandboxAgentRecord()] }));
+      return;
+    }
+
+    if (request.url === "/v1/agents" && request.method === "POST") {
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          agent: sandboxAgentRecord({
+            name: String(body.name ?? "Daily Report"),
+            selectedEntrypoint:
+              typeof body.selectedEntrypoint === "object" && body.selectedEntrypoint
+                ? (body.selectedEntrypoint as Record<string, unknown>)
+                : undefined,
+          }),
+        }),
+      );
+      return;
+    }
+
+    if (
+      request.url === "/v1/agents/agent_test?teamId=team_test" &&
+      request.method === "GET"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ agent: sandboxAgentRecord() }));
+      return;
+    }
+
+    if (
+      request.url === "/v1/agents/agent_test?teamId=team_test" &&
+      request.method === "DELETE"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          agent: sandboxAgentRecord({ status: "archived" }),
+        }),
+      );
+      return;
+    }
+
+    if (
+      request.url === "/v1/agents/agent_test/run" &&
+      request.method === "POST"
+    ) {
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          agent: sandboxAgentRecord(),
+          run: sandboxAgentRunRecord(body),
         }),
       );
       return;
@@ -1038,7 +1323,8 @@ async function withSandboxApi(
       response.end(
         JSON.stringify({
           runtime: sandboxRuntimeRecord({
-            appId: typeof body.appId === "string" ? body.appId : null,
+            projectId: typeof body.projectId === "string" ? body.projectId : null,
+            agentId: typeof body.agentId === "string" ? body.agentId : null,
           }),
         }),
       );
@@ -1053,7 +1339,8 @@ async function withSandboxApi(
       response.end(
         JSON.stringify({
           runtime: sandboxRuntimeRecord({
-            appId: typeof body.appId === "string" ? body.appId : null,
+            projectId: typeof body.projectId === "string" ? body.projectId : null,
+            agentId: typeof body.agentId === "string" ? body.agentId : null,
           }),
           sandbox: sandboxRecord({ runtimeId: "workspace_test" }),
         }),
@@ -1228,7 +1515,8 @@ function sandboxRecord(
     runtimeDriver: "remote-firecracker",
     repo: null,
     teamId: "team_test",
-    appId: null,
+    projectId: null,
+    agentId: null,
     visibility: "private",
     ownerUserId: "user_test",
     runtimeId: overrides.runtimeId ?? null,
@@ -1257,13 +1545,17 @@ function sandboxRecord(
 }
 
 function sandboxRuntimeRecord(
-  overrides: { appId?: string | null } = {},
+  overrides: {
+    projectId?: string | null;
+    agentId?: string | null;
+  } = {},
 ): Record<string, unknown> {
   return {
     id: "workspace_test",
     teamId: "team_test",
     userId: "user_test",
-    appId: overrides.appId ?? null,
+    projectId: overrides.projectId ?? null,
+    agentId: overrides.agentId ?? null,
     sandboxId: "sandbox_test",
     mode: "attempt",
     status: "waiting_for_user",
@@ -1301,6 +1593,114 @@ function sandboxRuntimeRecord(
     version: 2,
     createdAt: "2026-05-20T00:00:00.000Z",
     updatedAt: "2026-05-20T00:00:00.000Z",
+  };
+}
+
+function sandboxProjectRecord(
+  overrides: {
+    name?: string;
+    status?: string;
+    sourceType?: string;
+    gitOwner?: string | null;
+    gitRepo?: string | null;
+  } = {},
+): Record<string, unknown> {
+  return {
+    id: "project_test",
+    teamId: "team_test",
+    createdByUserId: "user_test",
+    name: overrides.name ?? "Demo Project",
+    slug: "demo-project",
+    description: null,
+    status: overrides.status ?? "active",
+    sourceType: overrides.sourceType ?? "internal_repo",
+    sourceConfig: {},
+    normalizedSourceIdentity: "internal_repo:openpond.ai:openpond/demo-project",
+    externalId: null,
+    gitProvider: null,
+    gitHost: "openpond.ai",
+    gitOwner: overrides.gitOwner ?? "openpond",
+    gitRepo: overrides.gitRepo ?? "demo-project",
+    gitBranch: null,
+    defaultBranch: "master",
+    internalRepoPath: null,
+    templateSourceProjectId: null,
+    templateRepoUrl: null,
+    templateBranch: null,
+    templateRemoteSha: null,
+    sandboxManifest: null,
+    sandboxActionRegistry: null,
+    sandboxManifestHash: null,
+    sandboxManifestPath: null,
+    sandboxManifestSyncedAt: null,
+    sandboxManifestError: null,
+    metadata: {},
+    createdAt: "2026-05-20T00:00:00.000Z",
+    updatedAt: "2026-05-20T00:00:00.000Z",
+    archivedAt: overrides.status === "archived" ? "2026-05-20T00:00:00.000Z" : null,
+  };
+}
+
+function sandboxAgentRecord(
+  overrides: {
+    name?: string;
+    status?: string;
+    selectedEntrypoint?: Record<string, unknown>;
+  } = {},
+): Record<string, unknown> {
+  return {
+    id: "agent_test",
+    teamId: "team_test",
+    createdByUserId: "user_test",
+    name: overrides.name ?? "Daily Report",
+    slug: "daily-report",
+    description: null,
+    status: overrides.status ?? "active",
+    projectId: "project_test",
+    workflowIntent: null,
+    selectedEntrypoint: overrides.selectedEntrypoint ?? {
+      scope: "entire_manifest",
+      name: null,
+    },
+    triggerType: "manual",
+    endpointPolicy: {},
+    backgroundTaskPolicy: {},
+    defaultRuntimeMode: "attempt",
+    defaultBranch: null,
+    sourceRefOverride: null,
+    defaultPromotionPolicy: "manual",
+    defaultResourcePolicy: {},
+    defaultLifecyclePolicy: {},
+    defaultCheckpointPolicy: {},
+    requiredIntegrationRefs: [],
+    requiredEnvironmentVariableRefs: [],
+    schedulePolicy: {},
+    externalId: null,
+    metadata: {},
+    createdAt: "2026-05-20T00:00:00.000Z",
+    updatedAt: "2026-05-20T00:00:00.000Z",
+    archivedAt: overrides.status === "archived" ? "2026-05-20T00:00:00.000Z" : null,
+  };
+}
+
+function sandboxAgentRunRecord(input: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: "agent_run_test",
+    teamId: "team_test",
+    projectId: "project_test",
+    agentId: "agent_test",
+    requestedByUserId: "user_test",
+    idempotencyKey: input.idempotencyKey ?? null,
+    triggerType: input.triggerType ?? "manual",
+    status: "running",
+    runtimeId: "workspace_test",
+    sandboxId: "sandbox_test",
+    selectedEntrypoint: { scope: "action", name: "hello" },
+    input: input.input ?? {},
+    metadata: input.metadata ?? {},
+    createdAt: "2026-05-20T00:00:00.000Z",
+    updatedAt: "2026-05-20T00:00:00.000Z",
+    completedAt: null,
   };
 }
 

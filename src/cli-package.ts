@@ -68,6 +68,10 @@ import {
   type OpenPondOrganizationMemberUpsertInput,
   type OpenPondOrganizationRole,
   type OpenPondOrganizationUpdateInput,
+  type SandboxAgent,
+  type SandboxAgentEntrypointScope,
+  type SandboxAgentTriggerType,
+  type SandboxAgentUpsertInput,
   type SandboxRuntime,
   type SandboxRuntimeCreateInput,
   type SandboxRuntimeMode,
@@ -76,6 +80,9 @@ import {
   type SandboxCreateInput,
   type SandboxEnvVarInput,
   type SandboxIntegrationConnectionLeaseInput,
+  type SandboxProject,
+  type SandboxProjectSourceType,
+  type SandboxProjectUpsertInput,
   type SandboxRecord,
   type SandboxReplayArtifact,
   type SandboxReplayInput,
@@ -135,6 +142,8 @@ type Command =
   | "apps"
   | "repo"
   | "sandbox"
+  | "project"
+  | "agent"
   | "sandbox-template"
   | "organization"
   | "organizations"
@@ -1743,15 +1752,24 @@ function buildSandboxTemplateStartCreateInput(
   const maxDurationSeconds = parseIntegerOption(options.maxDurationSeconds, "max-duration-seconds");
   const idleTimeoutSeconds = parseIntegerOption(options.idleTimeoutSeconds, "idle-timeout-seconds");
   const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-  const requestedAppId = typeof options.appId === "string" ? options.appId.trim() : "";
-  const sandboxRuntimeAppId =
-    typeof options.runtimeAppId === "string"
-      ? options.runtimeAppId.trim()
+  const requestedProjectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
+  const sandboxRuntimeProjectId =
+    typeof options.runtimeProjectId === "string"
+      ? options.runtimeProjectId.trim()
       : "";
-  if (requestedAppId && sandboxRuntimeAppId && requestedAppId !== sandboxRuntimeAppId) {
-    throw new Error("app-id and runtime-app-id must match when both are set");
+  if (requestedProjectId && sandboxRuntimeProjectId && requestedProjectId !== sandboxRuntimeProjectId) {
+    throw new Error("project-id and runtime-project-id must match when both are set");
   }
-  const appId = requestedAppId || sandboxRuntimeAppId;
+  const projectId = requestedProjectId || sandboxRuntimeProjectId;
+  const requestedAgentId = typeof options.agentId === "string" ? options.agentId.trim() : "";
+  const sandboxRuntimeAgentId =
+    typeof options.runtimeAgentId === "string"
+      ? options.runtimeAgentId.trim()
+      : "";
+  if (requestedAgentId && sandboxRuntimeAgentId && requestedAgentId !== sandboxRuntimeAgentId) {
+    throw new Error("agent-id and runtime-agent-id must match when both are set");
+  }
+  const agentId = requestedAgentId || sandboxRuntimeAgentId;
   const sandboxRuntimeMode = parseSandboxRuntimeModeOption(options.runtimeMode);
   const sandboxRuntimePromotionPolicy = parseSandboxRuntimePromotionPolicyOption(
     options.runtimePromotionPolicy,
@@ -1775,13 +1793,15 @@ function buildSandboxTemplateStartCreateInput(
       sandboxRuntimeBaseBranch ||
       sandboxRuntimeBaseSha ||
       runtimeId ||
-      sandboxRuntimeAppId,
+      sandboxRuntimeProjectId ||
+      sandboxRuntimeAgentId,
   );
   const env = parseSandboxTemplateEnvOptions(manifest, options);
   const sandbox: SandboxCreateInput = {
     repo,
     ...(teamId ? { teamId } : {}),
-    ...(appId ? { appId } : {}),
+    ...(projectId ? { projectId } : {}),
+    ...(agentId ? { agentId } : {}),
     resources: manifest.resources ?? {},
     networkPolicy: {
       internetEgress: sandboxTemplateInternetEgressPolicy(manifest.network.egress),
@@ -1812,7 +1832,8 @@ function buildSandboxTemplateStartCreateInput(
           sandboxRuntime: {
             ...(teamId ? { teamId } : {}),
             ...(sandboxRuntimeMode ? { mode: sandboxRuntimeMode } : {}),
-            ...(appId ? { appId } : {}),
+            ...(projectId ? { projectId } : {}),
+            ...(agentId ? { agentId } : {}),
             baseBranch: sandboxRuntimeBaseBranch || "master",
             ...(sandboxRuntimeBaseSha ? { baseSha: sandboxRuntimeBaseSha } : {}),
             ...(sandboxRuntimePromotionPolicy
@@ -1851,7 +1872,12 @@ async function createSandboxTemplateStartSchedules(
     return [];
   }
   const overrides = parseSandboxTemplateScheduleOverrides(manifest, options);
-  const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+  const projectId =
+    typeof options.projectId === "string" && options.projectId.trim()
+      ? options.projectId.trim()
+      : typeof options.runtimeProjectId === "string"
+        ? options.runtimeProjectId.trim()
+        : "";
   const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
   const created: Array<Record<string, unknown>> = [];
   for (const schedule of selection.schedules) {
@@ -1862,7 +1888,7 @@ async function createSandboxTemplateStartSchedules(
       mode: selection.mode,
       sourceSandboxId: sandboxId,
       teamId,
-      appId,
+      projectId,
     });
     const result = await client.createSchedule(input);
     created.push({
@@ -1996,7 +2022,7 @@ function buildSandboxTemplateStartScheduleInput(params: {
   mode: SandboxTemplateStartScheduleMode;
   sourceSandboxId: string;
   teamId: string;
-  appId: string;
+  projectId: string;
 }): SandboxScheduleCreateInput {
   const schedule = mergeSandboxTemplateScheduleOverride(
     params.schedule,
@@ -2006,7 +2032,7 @@ function buildSandboxTemplateStartScheduleInput(params: {
   return {
     sourceSandboxId: params.sourceSandboxId,
     ...(params.teamId ? { teamId: params.teamId } : {}),
-    ...(params.appId ? { appId: params.appId } : {}),
+    ...(params.projectId ? { projectId: params.projectId } : {}),
     name: schedule.name,
     ...(schedule.description ? { description: schedule.description } : {}),
     ...expression,
@@ -2185,7 +2211,12 @@ async function createSandboxFromPlan(
   plan: SandboxCreatePlan,
 ): Promise<SandboxCreatePlanResult> {
   if (!plan.sandboxRuntime && !plan.runtimeId) {
-    return { sandbox: await client.create(plan.sandbox) };
+    return {
+      sandbox: await waitForSandboxCreateReady(
+        client,
+        await client.create(plan.sandbox, { async: true }),
+      ),
+    };
   }
 
   const runtime =
@@ -2195,9 +2226,39 @@ async function createSandboxFromPlan(
   const runtimeId = plan.runtimeId ?? runtime!.id;
   const result = await client.createSandboxRuntimeSandbox(runtimeId, plan.sandbox);
   return {
-    sandbox: result.sandbox,
+    sandbox: await waitForSandboxCreateReady(client, result.sandbox),
     runtime: result.runtime ?? runtime,
   };
+}
+
+async function waitForSandboxCreateReady(
+  client: OpenPondSandboxClient,
+  sandbox: SandboxRecord,
+): Promise<SandboxRecord> {
+  if (sandbox.state === "running" || sandbox.state === "stopped") {
+    return sandbox;
+  }
+  if (sandbox.state === "error") {
+    throw new Error(`sandbox create failed: ${sandbox.id}\n${sandbox.logs.join("\n")}`);
+  }
+
+  const timeoutMs = 12 * 60_000;
+  const pollMs = 3_000;
+  const deadline = Date.now() + timeoutMs;
+  let latest = sandbox;
+  while (Date.now() < deadline) {
+    await sleep(pollMs);
+    latest = await client.get(sandbox.id);
+    if (latest.state === "running" || latest.state === "stopped") {
+      return latest;
+    }
+    if (latest.state === "error") {
+      throw new Error(`sandbox create failed: ${latest.id}\n${latest.logs.join("\n")}`);
+    }
+  }
+  throw new Error(
+    `sandbox create did not reach running state before timeout: ${latest.id} (${latest.state})`,
+  );
 }
 
 function isLikelySandboxCreateTimeout(error: unknown): boolean {
@@ -2210,7 +2271,7 @@ async function recoverTimedOutSandboxCreate(
   repo: string,
   requestedAt: number,
 ): Promise<SandboxRecord> {
-  const timeoutMs = 120_000;
+  const timeoutMs = 12 * 60_000;
   const pollMs = 3_000;
   const deadline = Date.now() + timeoutMs;
   const repoIdentity = normalizeSandboxTemplateRepoIdentity(repo);
@@ -2218,7 +2279,8 @@ async function recoverTimedOutSandboxCreate(
   while (Date.now() < deadline) {
     const sandboxes = await client.list({
       ...(input.teamId ? { teamId: input.teamId } : {}),
-      ...(input.appId ? { appId: input.appId } : {}),
+      ...(input.projectId ? { projectId: input.projectId } : {}),
+      ...(input.agentId ? { agentId: input.agentId } : {}),
     });
     const match = sandboxes
       .filter((sandbox) => {
@@ -2950,7 +3012,7 @@ function printHelp(): void {
   console.log(`  openpond sandbox-template run [--file ${OPENPOND_MANIFEST_FILE_NAME}|--build dist/${SANDBOX_TEMPLATE_BUILD_PLAN_FILE_NAME}] [--target <name>|--action <name>|--service <name>]`);
   console.log(`  openpond sandbox-template dev [--file ${OPENPOND_MANIFEST_FILE_NAME}|--build dist/${SANDBOX_TEMPLATE_BUILD_PLAN_FILE_NAME}] [--service <name>]`);
   console.log(
-    `  openpond sandbox-template start [--file ${OPENPOND_MANIFEST_FILE_NAME}] [--env-ref NAME=openpond://secret/...] [--input-file name=path] [--input-files name=glob] [--target <name>|--action <name>|--service <name>] [--runtime-mode <mode> --runtime-app-id <appId>] [--enable-schedules [all|name,...]|--disable-schedules [all|name,...]] [--schedule-overrides <json>] [--commit] [--no-push]`,
+    `  openpond sandbox-template start [--file ${OPENPOND_MANIFEST_FILE_NAME}] [--env-ref NAME=openpond://secret/...] [--input-file name=path] [--input-files name=glob] [--target <name>|--action <name>|--service <name>] [--project-id <projectId>] [--agent-id <agentId>] [--runtime-mode <mode> --runtime-project-id <projectId>] [--enable-schedules [all|name,...]|--disable-schedules [all|name,...]] [--schedule-overrides <json>] [--commit] [--no-push]`,
   );
   console.log(`  openpond sandbox-template action <sandboxId> <actionName> [--file ${OPENPOND_MANIFEST_FILE_NAME}]`);
   console.log(
@@ -2969,18 +3031,26 @@ function printHelp(): void {
   console.log("  openpond organizations mcp-enable <slug>");
   console.log("  openpond organizations mcp-probe <slug> [--origin <url>] [--tool <name>] [--arguments <json>] [--access-token <token>]");
   console.log("  openpond organizations mcp-authorize <slug> [--origin <url>] [--scope <csv|space>] [--tool <name>] [--arguments <json>] [--open]");
-  console.log("  openpond sandbox list [--env staging] [--sandbox-api-url <url>]");
+  console.log("  openpond project list --team-id <id>");
+  console.log("  openpond project create --team-id <id> --name <name> [--source-type manual|github_repo|internal_repo|template] [--repo <url>] [--git-owner <owner> --git-repo <repo>] [--internal-repo-path <path>] [--template-repo-url <url>]");
+  console.log("  openpond project get <projectId> --team-id <id>");
+  console.log("  openpond project archive <projectId> --team-id <id>");
+  console.log("  openpond agent list --team-id <id>");
+  console.log("  openpond agent create --team-id <id> --project-id <id> --name <name> [--entrypoint-scope entire_manifest|action|service|schedule] [--entrypoint-name <name>] [--trigger-type manual|schedule|endpoint|background] [--runtime-mode <mode>]");
+  console.log("  openpond agent run <agentId> --team-id <id> [--idempotency-key <key>] [--input <json>]");
+  console.log("  openpond agent archive <agentId> --team-id <id>");
+  console.log("  openpond sandbox list [--env staging] [--team-id <id>] [--project-id <id>] [--agent-id <id>] [--sandbox-api-url <url>]");
   console.log("  openpond sandbox mcp-config [--env staging] [--sandbox-api-url <url>]");
   console.log("  openpond sandbox secrets [--team-id <id>] [--json]");
   console.log("  openpond sandbox secret-create --name <ENV_NAME> [--team-id <id>] [--stdin]");
   console.log("  openpond sandbox secret-rotate <secretId> [--team-id <id>] [--stdin]");
   console.log("  openpond sandbox secret-revoke <secretId> [--team-id <id>]");
   console.log("  openpond sandbox secret-delete <secretId> [--team-id <id>]");
-  console.log("  openpond sandbox secret-attach <secretId> --env-name <ENV_NAME> --target-type sandbox|template|app|replay --target-id <id>");
-  console.log("  openpond sandbox snapshots [--team-id <id>] [--app-id <id>]");
-  console.log("  openpond sandbox templates [--team-id <id>] [--app-id <id>] [--query <text>] [--name <name>] [--use-case <id>]");
+  console.log("  openpond sandbox secret-attach <secretId> --env-name <ENV_NAME> --target-type sandbox|project|agent|template|replay --target-id <id>");
+  console.log("  openpond sandbox snapshots [--team-id <id>] [--project-id <id>] [--agent-id <id>]");
+  console.log("  openpond sandbox templates [--team-id <id>] [--project-id <id>] [--query <text>] [--name <name>] [--use-case <id>]");
   console.log("  openpond sandbox template-builds --team-id <id>");
-  console.log("  openpond sandbox template-build-create --team-id <id> --source-repo-url <url> [--branch <branch>] [--publish]");
+  console.log("  openpond sandbox template-build-create --team-id <id> [--source-repo-url <url>|--source-project-id <id>] [--branch <branch>] [--publish]");
   console.log("  openpond sandbox template-build-get <buildId>");
   console.log("  openpond sandbox template-build-logs <buildId>");
   console.log("  openpond sandbox template-build-cancel <buildId>");
@@ -2991,16 +3061,16 @@ function printHelp(): void {
   console.log("  openpond sandbox replay-cancel <replayId> [--team-id <id>]");
   console.log("  openpond sandbox replay-watch <replayId> [--team-id <id>] [--interval-ms 5000] [--timeout-ms 900000]");
   console.log("  openpond sandbox replay-artifacts <replayId> [--team-id <id>]");
-  console.log("  openpond sandbox runtime-list [--team-id <id>] [--app-id <id>]");
+  console.log("  openpond sandbox runtime-list [--team-id <id>] [--project-id <id>] [--agent-id <id>]");
   console.log("  openpond sandbox runtime-get <runtimeId>");
   console.log("  openpond sandbox runtime-events <runtimeId>");
   console.log("  openpond sandbox runtime-status <runtimeId> --status <status> --expected-version <n>");
   console.log("  openpond sandbox runtime-event <runtimeId> --type <eventType> [--summary <text>] [--payload <json>] [--lifecycle-hint <json>]");
   console.log("  openpond sandbox pricing");
-  console.log("  openpond sandbox costs [--team-id <id>] [--app-id <id>] [--summary]");
+  console.log("  openpond sandbox costs [--team-id <id>] [--project-id <id>] [--agent-id <id>] [--summary]");
   console.log("  openpond sandbox template-launch [--snapshot-id <id>|--template-name <name>|--use-case <id>] [--version <v>] [--team-id <id>] [--budget-usd 0.05]");
   console.log(
-    "  openpond sandbox snapshot-fork <snapshotId> [--team-id <id>] [--app-id <id>] [--budget-usd 0.05]",
+    "  openpond sandbox snapshot-fork <snapshotId> [--team-id <id>] [--project-id <id>] [--budget-usd 0.05]",
   );
   console.log(
     "  openpond sandbox snapshot-create <sandboxId> --name <name> [--template-name <name>] [--template-version <v>] [--template-visibility private|team] [--validation-command <cmd>]",
@@ -3010,10 +3080,10 @@ function printHelp(): void {
   );
   console.log("  openpond sandbox snapshot-publish <sandboxId> <snapshotId>");
   console.log(
-    "  openpond sandbox create [--repo <url>] [--budget-usd 0.05] [--env-ref NAME=openpond://secret/...] [--env-literal NAME=value] [--runtime-mode feature --runtime-app-id <appId> --runtime-base-branch master]",
+    "  openpond sandbox create [--repo <url>] [--budget-usd 0.05] [--env-ref NAME=openpond://secret/...] [--env-literal NAME=value] [--project-id <id>] [--agent-id <id>] [--runtime-mode feature --runtime-project-id <projectId> --runtime-base-branch master]",
   );
   console.log(
-    "    example: openpond sandbox create --runtime-mode feature --runtime-app-id app_123 --runtime-base-branch master",
+    "    example: openpond sandbox create --runtime-mode feature --runtime-project-id project_123 --runtime-base-branch master",
   );
   console.log('  openpond sandbox exec <sandboxId> --command "bun test"');
   console.log(
@@ -3024,7 +3094,7 @@ function printHelp(): void {
   console.log("  openpond sandbox receipts <sandboxId>");
   console.log("  openpond sandbox logs <sandboxId>");
   console.log("  openpond sandbox billing <sandboxId>");
-  console.log("  openpond sandbox integration-connections [--team-id <id>] [--app-id <id>] [--status active|all]");
+  console.log("  openpond sandbox integration-connections [--team-id <id>] [--project-id <id>] [--agent-id <id>] [--status active|all]");
   console.log("  openpond sandbox integration-leases <sandboxId>");
   console.log(
     "  openpond sandbox integration-attach <sandboxId> --integration-connection <id> --integration-capabilities <csv>",
@@ -4316,6 +4386,253 @@ function formatSandboxLine(sandbox: SandboxRecord): string {
   ].join("  ");
 }
 
+function optionString(
+  options: Record<string, string | boolean>,
+  key: string,
+): string {
+  const value = options[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function requiredTeamId(options: Record<string, string | boolean>, usage: string): string {
+  const teamId = optionString(options, "teamId");
+  if (!teamId) {
+    throw new Error(`${usage} --team-id <id>`);
+  }
+  return teamId;
+}
+
+function optionalJsonObject(
+  options: Record<string, string | boolean>,
+  key: string,
+  label: string,
+): Record<string, unknown> | undefined {
+  const value = optionString(options, key);
+  return value ? parseJsonObjectOption(value, label) : undefined;
+}
+
+function parseProjectSourceType(value: string | boolean | undefined): SandboxProjectSourceType {
+  const sourceType = typeof value === "string" && value.trim()
+    ? value.trim()
+    : "manual";
+  if (
+    sourceType !== "github_repo" &&
+    sourceType !== "internal_repo" &&
+    sourceType !== "template" &&
+    sourceType !== "manual"
+  ) {
+    throw new Error("source-type must be one of github_repo, internal_repo, template, manual");
+  }
+  return sourceType;
+}
+
+function parseAgentEntrypointScope(
+  value: string | boolean | undefined,
+): SandboxAgentEntrypointScope | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("entrypoint-scope must be a non-empty value");
+  }
+  const scope = value.trim() as SandboxAgentEntrypointScope;
+  if (
+    scope !== "entire_manifest" &&
+    scope !== "start" &&
+    scope !== "action" &&
+    scope !== "service" &&
+    scope !== "schedule"
+  ) {
+    throw new Error("entrypoint-scope must be one of entire_manifest, start, action, service, schedule");
+  }
+  return scope;
+}
+
+function parseAgentTriggerType(
+  value: string | boolean | undefined,
+): SandboxAgentTriggerType | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("trigger-type must be a non-empty value");
+  }
+  const triggerType = value.trim() as SandboxAgentTriggerType;
+  if (
+    triggerType !== "manual" &&
+    triggerType !== "schedule" &&
+    triggerType !== "endpoint" &&
+    triggerType !== "background"
+  ) {
+    throw new Error("trigger-type must be one of manual, schedule, endpoint, background");
+  }
+  return triggerType;
+}
+
+function buildProjectUpsertInput(
+  options: Record<string, string | boolean>,
+): SandboxProjectUpsertInput {
+  const usage = "usage: project create --team-id <id> --name <name>";
+  const teamId = requiredTeamId(options, usage);
+  const name = optionString(options, "name");
+  if (!name) {
+    throw new Error(`${usage} [--source-type manual|github_repo|internal_repo|template]`);
+  }
+  const sourceType = parseProjectSourceType(options.sourceType);
+  const repoUrl = optionString(options, "repoUrl") || optionString(options, "repo");
+  const sourceConfig = {
+    ...(optionalJsonObject(options, "sourceConfig", "source-config") ?? {}),
+    ...(repoUrl ? { repoUrl } : {}),
+  };
+  const metadata = optionalJsonObject(options, "metadata", "metadata");
+  return {
+    teamId,
+    name,
+    sourceType,
+    ...(optionString(options, "slug") ? { slug: optionString(options, "slug") } : {}),
+    ...(optionString(options, "description")
+      ? { description: optionString(options, "description") }
+      : {}),
+    ...(options.status === "active" || options.status === "disabled" || options.status === "archived"
+      ? { status: options.status }
+      : {}),
+    ...(Object.keys(sourceConfig).length > 0 ? { sourceConfig } : {}),
+    ...(optionString(options, "normalizedSourceIdentity")
+      ? { normalizedSourceIdentity: optionString(options, "normalizedSourceIdentity") }
+      : {}),
+    ...(optionString(options, "externalId") ? { externalId: optionString(options, "externalId") } : {}),
+    ...(optionString(options, "gitProvider") ? { gitProvider: optionString(options, "gitProvider") } : {}),
+    ...(optionString(options, "gitHost") ? { gitHost: optionString(options, "gitHost") } : {}),
+    ...(optionString(options, "gitOwner") ? { gitOwner: optionString(options, "gitOwner") } : {}),
+    ...(optionString(options, "gitRepo") ? { gitRepo: optionString(options, "gitRepo") } : {}),
+    ...(optionString(options, "gitBranch") ? { gitBranch: optionString(options, "gitBranch") } : {}),
+    ...(optionString(options, "defaultBranch")
+      ? { defaultBranch: optionString(options, "defaultBranch") }
+      : {}),
+    ...(optionString(options, "internalRepoPath")
+      ? { internalRepoPath: optionString(options, "internalRepoPath") }
+      : {}),
+    ...(optionString(options, "templateSourceProjectId")
+      ? { templateSourceProjectId: optionString(options, "templateSourceProjectId") }
+      : {}),
+    ...(optionString(options, "templateRepoUrl")
+      ? { templateRepoUrl: optionString(options, "templateRepoUrl") }
+      : {}),
+    ...(optionString(options, "templateBranch")
+      ? { templateBranch: optionString(options, "templateBranch") }
+      : {}),
+    ...(optionString(options, "templateRemoteSha")
+      ? { templateRemoteSha: optionString(options, "templateRemoteSha") }
+      : {}),
+    ...(metadata ? { metadata } : {}),
+  };
+}
+
+function buildAgentUpsertInput(
+  options: Record<string, string | boolean>,
+): SandboxAgentUpsertInput {
+  const usage = "usage: agent create --team-id <id> --project-id <id> --name <name>";
+  const teamId = requiredTeamId(options, usage);
+  const projectId = optionString(options, "projectId");
+  const name = optionString(options, "name");
+  if (!projectId || !name) {
+    throw new Error(usage);
+  }
+  const entrypointScope = parseAgentEntrypointScope(options.entrypointScope);
+  const entrypointName = optionString(options, "entrypointName");
+  const triggerType = parseAgentTriggerType(options.triggerType);
+  const runtimeMode = parseSandboxRuntimeModeOption(options.runtimeMode);
+  const promotionPolicy = parseSandboxRuntimePromotionPolicyOption(
+    options.runtimePromotionPolicy,
+  );
+  const metadata = optionalJsonObject(options, "metadata", "metadata");
+  return {
+    teamId,
+    projectId,
+    name,
+    ...(optionString(options, "slug") ? { slug: optionString(options, "slug") } : {}),
+    ...(optionString(options, "description")
+      ? { description: optionString(options, "description") }
+      : {}),
+    ...(options.status === "active" || options.status === "disabled" || options.status === "archived"
+      ? { status: options.status }
+      : {}),
+    ...(entrypointScope
+      ? { selectedEntrypoint: { scope: entrypointScope, name: entrypointName || null } }
+      : {}),
+    ...(triggerType ? { triggerType } : {}),
+    ...(runtimeMode ? { defaultRuntimeMode: runtimeMode } : {}),
+    ...(optionString(options, "defaultBranch")
+      ? { defaultBranch: optionString(options, "defaultBranch") }
+      : {}),
+    ...(optionString(options, "sourceRefOverride")
+      ? { sourceRefOverride: optionString(options, "sourceRefOverride") }
+      : {}),
+    ...(promotionPolicy ? { defaultPromotionPolicy: promotionPolicy } : {}),
+    ...(optionalJsonObject(options, "endpointPolicy", "endpoint-policy")
+      ? { endpointPolicy: optionalJsonObject(options, "endpointPolicy", "endpoint-policy") }
+      : {}),
+    ...(optionalJsonObject(options, "backgroundTaskPolicy", "background-task-policy")
+      ? {
+          backgroundTaskPolicy: optionalJsonObject(
+            options,
+            "backgroundTaskPolicy",
+            "background-task-policy",
+          ),
+        }
+      : {}),
+    ...(optionalJsonObject(options, "resourcePolicy", "resource-policy")
+      ? { defaultResourcePolicy: optionalJsonObject(options, "resourcePolicy", "resource-policy") }
+      : {}),
+    ...(optionalJsonObject(options, "lifecyclePolicy", "lifecycle-policy")
+      ? { defaultLifecyclePolicy: optionalJsonObject(options, "lifecyclePolicy", "lifecycle-policy") }
+      : {}),
+    ...(optionalJsonObject(options, "checkpointPolicy", "checkpoint-policy")
+      ? {
+          defaultCheckpointPolicy: optionalJsonObject(
+            options,
+            "checkpointPolicy",
+            "checkpoint-policy",
+          ),
+        }
+      : {}),
+    ...(parseCsvOption(options.requiredIntegrations).length > 0
+      ? { requiredIntegrationRefs: parseCsvOption(options.requiredIntegrations) }
+      : {}),
+    ...(parseCsvOption(options.requiredEnv).length > 0
+      ? { requiredEnvironmentVariableRefs: parseCsvOption(options.requiredEnv) }
+      : {}),
+    ...(optionalJsonObject(options, "schedulePolicy", "schedule-policy")
+      ? { schedulePolicy: optionalJsonObject(options, "schedulePolicy", "schedule-policy") }
+      : {}),
+    ...(optionString(options, "externalId") ? { externalId: optionString(options, "externalId") } : {}),
+    ...(metadata ? { metadata } : {}),
+  };
+}
+
+function formatProjectLine(project: SandboxProject): string {
+  const source = project.gitRepo
+    ? `${project.gitOwner ?? "_"}/${project.gitRepo}`
+    : project.internalRepoPath ?? project.templateRepoUrl ?? project.normalizedSourceIdentity;
+  return [
+    project.id,
+    project.status,
+    project.sourceType,
+    project.name,
+    source,
+  ].join("  ");
+}
+
+function formatAgentLine(agent: SandboxAgent): string {
+  const entrypoint = agent.selectedEntrypoint.name
+    ? `${agent.selectedEntrypoint.scope}:${agent.selectedEntrypoint.name}`
+    : agent.selectedEntrypoint.scope;
+  return [
+    agent.id,
+    agent.status,
+    agent.triggerType,
+    agent.defaultRuntimeMode,
+    entrypoint,
+    agent.name,
+  ].join("  ");
+}
+
 function formatSnapshotCatalogLine(snapshot: {
   id: string;
   kind: string;
@@ -5006,7 +5323,7 @@ function normalizeReplayCleanup(value: unknown): SandboxReplayInput["cleanup"] |
 
 function buildSandboxReplayInput(
   options: Record<string, string | boolean>,
-): SandboxReplayInput & { teamId?: string; appId?: string } {
+): SandboxReplayInput & { teamId?: string; projectId?: string } {
   const snapshotId =
     typeof options.snapshotId === "string" && options.snapshotId.trim()
       ? options.snapshotId.trim()
@@ -5017,7 +5334,7 @@ function buildSandboxReplayInput(
     throw new Error("replay-start requires --snapshot-id <id>");
   }
   const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-  const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+  const projectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
   const sourceSandboxId =
     typeof options.sourceSandboxId === "string" && options.sourceSandboxId.trim()
       ? options.sourceSandboxId.trim()
@@ -5050,7 +5367,7 @@ function buildSandboxReplayInput(
   return {
     snapshotId,
     ...(teamId ? { teamId } : {}),
-    ...(appId ? { appId } : {}),
+    ...(projectId ? { projectId } : {}),
     ...(sourceSandboxId ? { sourceSandboxId } : {}),
     ...(entrypoint ? { entrypoint } : {}),
     params: params as Record<string, unknown>,
@@ -5100,15 +5417,24 @@ function buildSandboxCreateInput(options: Record<string, string | boolean>): San
   const integrationCapabilities = parseCsvOption(options.integrationCapabilities);
   const integrationScopes = parseCsvOption(options.integrationScopes);
   const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-  const requestedAppId = typeof options.appId === "string" ? options.appId.trim() : "";
-  const sandboxRuntimeAppId =
-    typeof options.runtimeAppId === "string"
-      ? options.runtimeAppId.trim()
+  const requestedProjectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
+  const sandboxRuntimeProjectId =
+    typeof options.runtimeProjectId === "string"
+      ? options.runtimeProjectId.trim()
       : "";
-  if (requestedAppId && sandboxRuntimeAppId && requestedAppId !== sandboxRuntimeAppId) {
-    throw new Error("app-id and runtime-app-id must match when both are set");
+  if (requestedProjectId && sandboxRuntimeProjectId && requestedProjectId !== sandboxRuntimeProjectId) {
+    throw new Error("project-id and runtime-project-id must match when both are set");
   }
-  const appId = requestedAppId || sandboxRuntimeAppId;
+  const projectId = requestedProjectId || sandboxRuntimeProjectId;
+  const requestedAgentId = typeof options.agentId === "string" ? options.agentId.trim() : "";
+  const sandboxRuntimeAgentId =
+    typeof options.runtimeAgentId === "string"
+      ? options.runtimeAgentId.trim()
+      : "";
+  if (requestedAgentId && sandboxRuntimeAgentId && requestedAgentId !== sandboxRuntimeAgentId) {
+    throw new Error("agent-id and runtime-agent-id must match when both are set");
+  }
+  const agentId = requestedAgentId || sandboxRuntimeAgentId;
   const sandboxRuntimeMode = parseSandboxRuntimeModeOption(options.runtimeMode);
   const sandboxRuntimePromotionPolicy = parseSandboxRuntimePromotionPolicyOption(
     options.runtimePromotionPolicy,
@@ -5132,7 +5458,8 @@ function buildSandboxCreateInput(options: Record<string, string | boolean>): San
       sandboxRuntimeBaseBranch ||
       sandboxRuntimeBaseSha ||
       runtimeId ||
-      sandboxRuntimeAppId,
+      sandboxRuntimeProjectId ||
+      sandboxRuntimeAgentId,
   );
   const env = parseSandboxEnvOptions(options);
 
@@ -5143,7 +5470,8 @@ function buildSandboxCreateInput(options: Record<string, string | boolean>): San
   const sandbox: SandboxCreateInput = {
     ...(repo ? { repo } : {}),
     ...(teamId ? { teamId } : {}),
-    ...(appId ? { appId } : {}),
+    ...(projectId ? { projectId } : {}),
+    ...(agentId ? { agentId } : {}),
     ...(command ? { command } : {}),
     resources: {
       ...(cpu !== undefined ? { cpu } : {}),
@@ -5197,7 +5525,8 @@ function buildSandboxCreateInput(options: Record<string, string | boolean>): San
           sandboxRuntime: {
             ...(teamId ? { teamId } : {}),
             ...(sandboxRuntimeMode ? { mode: sandboxRuntimeMode } : {}),
-            ...(appId ? { appId } : {}),
+            ...(projectId ? { projectId } : {}),
+            ...(agentId ? { agentId } : {}),
             baseBranch: sandboxRuntimeBaseBranch || "master",
             ...(sandboxRuntimeBaseSha ? { baseSha: sandboxRuntimeBaseSha } : {}),
             ...(sandboxRuntimePromotionPolicy
@@ -5330,21 +5659,21 @@ function buildTemplateBuildCreateInput(
   const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
   const sourceRepoUrl =
     typeof options.sourceRepoUrl === "string" ? options.sourceRepoUrl.trim() : "";
-  const sourceAppId =
-    typeof options.sourceAppId === "string" ? options.sourceAppId.trim() : "";
+  const sourceProjectId =
+    typeof options.sourceProjectId === "string" ? options.sourceProjectId.trim() : "";
   const branch = typeof options.branch === "string" ? options.branch.trim() : "";
   const manifestPath =
     typeof options.manifestPath === "string" ? options.manifestPath.trim() : "";
   if (!teamId) {
     throw new Error("template-build-create requires --team-id <id>");
   }
-  if (!sourceRepoUrl && !sourceAppId) {
-    throw new Error("template-build-create requires --source-repo-url <url> or --source-app-id <id>");
+  if (!sourceRepoUrl && !sourceProjectId) {
+    throw new Error("template-build-create requires --source-repo-url <url> or --source-project-id <id>");
   }
   return {
     teamId,
     ...(sourceRepoUrl ? { sourceRepoUrl } : {}),
-    ...(sourceAppId ? { sourceAppId } : {}),
+    ...(sourceProjectId ? { sourceProjectId } : {}),
     ...(branch ? { branch } : {}),
     ...(manifestPath ? { manifestPath } : {}),
     publish: parseBooleanOption(options.publish),
@@ -5727,6 +6056,143 @@ async function runOrganizationsCommand(
   );
 }
 
+async function runProjectCommand(
+  options: Record<string, string | boolean>,
+  rest: string[],
+): Promise<void> {
+  const subcommand = rest[0] || "list";
+  const client = await resolveSandboxClient(options);
+
+  if (subcommand === "list") {
+    const teamId = requiredTeamId(options, "usage: project list");
+    const projects = await client.projects.list({ teamId });
+    if (parseBooleanOption(options.json)) {
+      console.log(JSON.stringify({ projects }, null, 2));
+      return;
+    }
+    if (projects.length === 0) {
+      console.log("no sandbox projects found");
+      return;
+    }
+    for (const project of projects) {
+      console.log(formatProjectLine(project));
+    }
+    return;
+  }
+
+  if (subcommand === "create" || subcommand === "upsert") {
+    const project = await client.projects.upsert(buildProjectUpsertInput(options));
+    console.log(JSON.stringify({ project }, null, 2));
+    return;
+  }
+
+  if (subcommand === "get") {
+    const projectId = rest[1]?.trim();
+    const teamId = requiredTeamId(options, "usage: project get <projectId>");
+    if (!projectId) {
+      throw new Error("usage: project get <projectId> --team-id <id>");
+    }
+    const project = await client.projects.get(projectId, { teamId });
+    console.log(JSON.stringify({ project }, null, 2));
+    return;
+  }
+
+  if (subcommand === "archive") {
+    const projectId = rest[1]?.trim();
+    const teamId = requiredTeamId(options, "usage: project archive <projectId>");
+    if (!projectId) {
+      throw new Error("usage: project archive <projectId> --team-id <id>");
+    }
+    const project = await client.projects.archive(projectId, { teamId });
+    console.log(JSON.stringify({ project }, null, 2));
+    return;
+  }
+
+  throw new Error(
+    "usage: project <list|create|upsert|get|archive> [--team-id <id>] [--name <name>]",
+  );
+}
+
+async function runAgentCommand(
+  options: Record<string, string | boolean>,
+  rest: string[],
+): Promise<void> {
+  const subcommand = rest[0] || "list";
+  const client = await resolveSandboxClient(options);
+
+  if (subcommand === "list") {
+    const teamId = requiredTeamId(options, "usage: agent list");
+    const agents = await client.agents.list({ teamId });
+    if (parseBooleanOption(options.json)) {
+      console.log(JSON.stringify({ agents }, null, 2));
+      return;
+    }
+    if (agents.length === 0) {
+      console.log("no sandbox agents found");
+      return;
+    }
+    for (const agent of agents) {
+      console.log(formatAgentLine(agent));
+    }
+    return;
+  }
+
+  if (subcommand === "create" || subcommand === "upsert") {
+    const agent = await client.agents.upsert(buildAgentUpsertInput(options));
+    console.log(JSON.stringify({ agent }, null, 2));
+    return;
+  }
+
+  if (subcommand === "get") {
+    const agentId = rest[1]?.trim();
+    const teamId = requiredTeamId(options, "usage: agent get <agentId>");
+    if (!agentId) {
+      throw new Error("usage: agent get <agentId> --team-id <id>");
+    }
+    const agent = await client.agents.get(agentId, { teamId });
+    console.log(JSON.stringify({ agent }, null, 2));
+    return;
+  }
+
+  if (subcommand === "run") {
+    const agentId = rest[1]?.trim();
+    const teamId = requiredTeamId(options, "usage: agent run <agentId>");
+    if (!agentId) {
+      throw new Error("usage: agent run <agentId> --team-id <id>");
+    }
+    const idempotencyKey = optionString(options, "idempotencyKey");
+    const triggerType = parseAgentTriggerType(options.triggerType);
+    const runtimeMode = parseSandboxRuntimeModeOption(options.runtimeMode);
+    const inputObject = optionalJsonObject(options, "input", "input");
+    const metadata = optionalJsonObject(options, "metadata", "metadata");
+    const result = await client.agents.run(agentId, {
+      teamId,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+      ...(triggerType ? { triggerType } : {}),
+      ...(runtimeMode ? { runtimeMode } : {}),
+      ...(inputObject ? { input: inputObject } : {}),
+      ...(metadata ? { metadata } : {}),
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (subcommand === "archive") {
+    const agentId = rest[1]?.trim();
+    const teamId = requiredTeamId(options, "usage: agent archive <agentId>");
+    if (!agentId) {
+      throw new Error("usage: agent archive <agentId> --team-id <id>");
+    }
+    const agent = await client.agents.archive(agentId, { teamId });
+    console.log(JSON.stringify({ agent }, null, 2));
+    return;
+  }
+
+  throw new Error(
+    "usage: agent <list|create|upsert|get|run|archive> [--team-id <id>] [--project-id <id>] [--name <name>]",
+  );
+}
+
 async function runSandboxCommand(
   options: Record<string, string | boolean>,
   rest: string[],
@@ -5736,10 +6202,12 @@ async function runSandboxCommand(
 
   if (subcommand === "list") {
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const projectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
+    const agentId = typeof options.agentId === "string" ? options.agentId.trim() : "";
     const sandboxes = await client.list({
       ...(teamId ? { teamId } : {}),
-      ...(appId ? { appId } : {}),
+      ...(projectId ? { projectId } : {}),
+      ...(agentId ? { agentId } : {}),
     });
     if (sandboxes.length === 0) {
       console.log("no sandboxes found");
@@ -5770,10 +6238,12 @@ async function runSandboxCommand(
 
   if (subcommand === "runtime-list") {
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const projectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
+    const agentId = typeof options.agentId === "string" ? options.agentId.trim() : "";
     const runtimes = await client.listSandboxRuntimes({
       ...(teamId ? { teamId } : {}),
-      ...(appId ? { appId } : {}),
+      ...(projectId ? { projectId } : {}),
+      ...(agentId ? { agentId } : {}),
     });
     console.log(JSON.stringify({ runtimes }, null, 2));
     return;
@@ -5831,10 +6301,12 @@ async function runSandboxCommand(
 
   if (subcommand === "costs") {
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const projectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
+    const agentId = typeof options.agentId === "string" ? options.agentId.trim() : "";
     const costs = await client.costs({
       ...(teamId ? { teamId } : {}),
-      ...(appId ? { appId } : {}),
+      ...(projectId ? { projectId } : {}),
+      ...(agentId ? { agentId } : {}),
     });
     if (parseBooleanOption(options.summary)) {
       console.log(
@@ -5903,10 +6375,8 @@ async function runSandboxCommand(
 
   if (subcommand === "secrets" || subcommand === "secret-list") {
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
     const secrets = await client.listSecrets({
       ...(teamId ? { teamId } : {}),
-      ...(appId ? { appId } : {}),
     });
     if (parseBooleanOption(options.json)) {
       console.log(
@@ -5934,7 +6404,7 @@ async function runSandboxCommand(
         ? options.description.trim()
         : undefined;
     const scope =
-      options.scope === "app" || options.scope === "template" || options.scope === "team"
+      options.scope === "project" || options.scope === "template" || options.scope === "team"
         ? options.scope
         : undefined;
     if (!name) {
@@ -5974,14 +6444,15 @@ async function runSandboxCommand(
     const targetType =
       options.targetType === "sandbox" ||
       options.targetType === "template" ||
-      options.targetType === "app" ||
+      options.targetType === "project" ||
+      options.targetType === "agent" ||
       options.targetType === "replay"
         ? options.targetType
         : undefined;
     const targetId = typeof options.targetId === "string" ? options.targetId.trim() : "";
     if (!secretId || !envName || !targetType || !targetId) {
       throw new Error(
-        "usage: sandbox secret-attach <secretId> --env-name <ENV_NAME> --target-type sandbox|template|app|replay --target-id <id>",
+        "usage: sandbox secret-attach <secretId> --env-name <ENV_NAME> --target-type sandbox|project|agent|template|replay --target-id <id>",
       );
     }
     const secret = await client.attachSecret(secretId, {
@@ -6014,7 +6485,8 @@ async function runSandboxCommand(
 
   if (subcommand === "snapshots" || subcommand === "snapshot-catalog") {
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const projectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
+    const agentId = typeof options.agentId === "string" ? options.agentId.trim() : "";
     const query =
       typeof options.query === "string" && options.query.trim()
         ? options.query.trim()
@@ -6027,7 +6499,8 @@ async function runSandboxCommand(
       typeof options.replayState === "string" ? options.replayState.trim() : "";
     const catalog = await client.snapshotCatalog({
       ...(teamId ? { teamId } : {}),
-      ...(appId ? { appId } : {}),
+      ...(projectId ? { projectId } : {}),
+      ...(agentId ? { agentId } : {}),
       ...(query ? { q: query } : {}),
       ...(tag ? { tag } : {}),
       ...(useCase ? { useCase } : {}),
@@ -6049,7 +6522,7 @@ async function runSandboxCommand(
 
   if (subcommand === "templates" || subcommand === "template-catalog") {
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const projectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
     const query =
       typeof options.query === "string" && options.query.trim()
         ? options.query.trim()
@@ -6067,7 +6540,7 @@ async function runSandboxCommand(
     const useCase = typeof options.useCase === "string" ? options.useCase.trim() : "";
     const catalog = await client.templates({
       ...(teamId ? { teamId } : {}),
-      ...(appId ? { appId } : {}),
+      ...(projectId ? { projectId } : {}),
       ...(query ? { q: query } : {}),
       ...(name ? { name } : {}),
       ...(version ? { version } : {}),
@@ -6184,10 +6657,10 @@ async function runSandboxCommand(
 
   if (subcommand === "replays" || subcommand === "replay-list") {
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const projectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
     const result = await client.listReplays({
       ...(teamId ? { teamId } : {}),
-      ...(appId ? { appId } : {}),
+      ...(projectId ? { projectId } : {}),
     });
     if (parseBooleanOption(options.json)) {
       console.log(JSON.stringify(result, null, 2));
@@ -6215,10 +6688,10 @@ async function runSandboxCommand(
       throw new Error("usage: sandbox replay-get <replayId> [--team-id <id>]");
     }
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const projectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
     const result = await client.getReplay(replayId, {
       ...(teamId ? { teamId } : {}),
-      ...(appId ? { appId } : {}),
+      ...(projectId ? { projectId } : {}),
     });
     console.log(JSON.stringify(result, null, 2));
     return;
@@ -6230,10 +6703,10 @@ async function runSandboxCommand(
       throw new Error("usage: sandbox replay-logs <replayId> [--team-id <id>]");
     }
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const projectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
     const result = await client.getReplayLogs(replayId, {
       ...(teamId ? { teamId } : {}),
-      ...(appId ? { appId } : {}),
+      ...(projectId ? { projectId } : {}),
     });
     for (const line of result.logs) {
       console.log(line);
@@ -6247,10 +6720,10 @@ async function runSandboxCommand(
       throw new Error("usage: sandbox replay-artifacts <replayId> [--team-id <id>]");
     }
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const projectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
     const result = await client.getReplayArtifacts(replayId, {
       ...(teamId ? { teamId } : {}),
-      ...(appId ? { appId } : {}),
+      ...(projectId ? { projectId } : {}),
     });
     console.log(
       JSON.stringify(
@@ -6271,10 +6744,10 @@ async function runSandboxCommand(
       throw new Error("usage: sandbox replay-cancel <replayId> [--team-id <id>]");
     }
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const projectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
     const result = await client.cancelReplay(replayId, {
       ...(teamId ? { teamId } : {}),
-      ...(appId ? { appId } : {}),
+      ...(projectId ? { projectId } : {}),
     });
     console.log(JSON.stringify(result, null, 2));
     return;
@@ -6286,7 +6759,7 @@ async function runSandboxCommand(
       throw new Error("usage: sandbox replay-watch <replayId> [--team-id <id>]");
     }
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const projectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
     const intervalMs = parseIntegerOption(options.intervalMs, "interval-ms") ?? 5000;
     const timeoutMs = parseIntegerOption(options.timeoutMs, "timeout-ms") ?? 15 * 60 * 1000;
     const startedAt = Date.now();
@@ -6294,7 +6767,7 @@ async function runSandboxCommand(
     while (Date.now() - startedAt <= timeoutMs) {
       const result = await client.getReplay(replayId, {
         ...(teamId ? { teamId } : {}),
-        ...(appId ? { appId } : {}),
+        ...(projectId ? { projectId } : {}),
       });
       for (const line of result.replay.logs) {
         if (!seenLogs.has(line)) {
@@ -6320,7 +6793,7 @@ async function runSandboxCommand(
 
   if (subcommand === "template-launch" || subcommand === "launch-template") {
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const projectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
     const snapshotId =
       typeof options.snapshotId === "string" && options.snapshotId.trim()
         ? options.snapshotId.trim()
@@ -6350,7 +6823,7 @@ async function runSandboxCommand(
           : "";
     const result = await client.launchTemplate({
       ...(teamId ? { teamId } : {}),
-      ...(appId ? { appId } : {}),
+      ...(projectId ? { projectId } : {}),
       ...(snapshotId ? { snapshotId } : {}),
       ...(templateName ? { templateName } : {}),
       ...(version ? { version } : {}),
@@ -6370,7 +6843,7 @@ async function runSandboxCommand(
       throw new Error("snapshot-fork requires <snapshotId>");
     }
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const projectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
     const budgetUsd =
       typeof options.budgetUsd === "string" && options.budgetUsd.trim()
         ? options.budgetUsd.trim()
@@ -6379,7 +6852,7 @@ async function runSandboxCommand(
           : "";
     const result = await client.forkSnapshot(snapshotId, {
       ...(teamId ? { teamId } : {}),
-      ...(appId ? { appId } : {}),
+      ...(projectId ? { projectId } : {}),
       ...(budgetUsd ? { budget: { maxUsd: budgetUsd } } : {}),
       metadata: {
         source: "openpond-code-snapshot-fork",
@@ -6430,7 +6903,8 @@ async function runSandboxCommand(
 
   if (subcommand === "integration-connections") {
     const teamId = typeof options.teamId === "string" ? options.teamId.trim() : "";
-    const appId = typeof options.appId === "string" ? options.appId.trim() : "";
+    const projectId = typeof options.projectId === "string" ? options.projectId.trim() : "";
+    const agentId = typeof options.agentId === "string" ? options.agentId.trim() : "";
     const status =
       options.status === "active" ||
       options.status === "revoked" ||
@@ -6440,7 +6914,8 @@ async function runSandboxCommand(
         : undefined;
     const result = await client.integrationConnections({
       ...(teamId ? { teamId } : {}),
-      ...(appId ? { appId } : {}),
+      ...(projectId ? { projectId } : {}),
+      ...(agentId ? { agentId } : {}),
       ...(status ? { status } : {}),
     });
     console.log(JSON.stringify(result, null, 2));
@@ -6544,6 +7019,25 @@ async function runSandboxCommand(
       JSON.stringify(
         {
           sandbox: summarizeSandbox(result.sandbox),
+          receipt: result.receipt,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (subcommand === "start") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error("usage: sandbox start <sandboxId>");
+    }
+    const result = await client.start(sandboxId);
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: await waitForSandboxCreateReady(client, result.sandbox),
           receipt: result.receipt,
         },
         null,
@@ -7311,12 +7805,20 @@ async function runSandboxCommand(
       options.preview !== undefined
         ? parseBooleanOption(options.preview)
         : !parseBooleanOption(options.noPreview);
+    const snapshot = parseBooleanOption(options.snapshot);
+    const fork = parseBooleanOption(options.fork);
     const smokeOptions: SandboxSmokeOptions = {
       ...(repo ? { repo } : {}),
       ...(budgetUsd ? { budgetUsd } : {}),
       keep,
       preview,
+      snapshot,
+      fork,
     };
+    if (typeof options.expectedMppMode === "string" && options.expectedMppMode.trim()) {
+      smokeOptions.expectedMppMode =
+        options.expectedMppMode.trim() as SandboxSmokeOptions["expectedMppMode"];
+    }
     const cpu = parseNumberOption(options.cpu, "cpu");
     const memoryGb = parseNumberOption(options.memoryGb, "memory-gb");
     const diskGb = parseNumberOption(options.diskGb, "disk-gb");
@@ -7329,7 +7831,7 @@ async function runSandboxCommand(
   }
 
   throw new Error(
-    "usage: sandbox <list|mcp-config|runtime-list|runtime-get|runtime-events|runtime-status|runtime-event|pricing|costs|secrets|secret-create|secret-rotate|secret-attach|secret-revoke|secret-delete|snapshots|templates|template-launch|snapshot-fork|snapshot-validate|snapshot-publish|create|exec|port|preview|stop|delete|receipts|logs|billing|process-start|process-list|process-get|process-stop|process-stream|pty-start|pty-list|pty-get|pty-write|pty-stop|pty-stream|upload-file|download-file|list-files|search-files|delete-file|stat-file|mkdir|move-file|git-status|git-diff|git-branch|git-commit|git-pull|git-push|smoke> [args]",
+    "usage: sandbox <list|mcp-config|runtime-list|runtime-get|runtime-events|runtime-status|runtime-event|pricing|costs|secrets|secret-create|secret-rotate|secret-attach|secret-revoke|secret-delete|snapshots|templates|template-launch|snapshot-fork|snapshot-validate|snapshot-publish|create|exec|port|preview|stop|start|delete|receipts|logs|billing|process-start|process-list|process-get|process-stop|process-stream|pty-start|pty-list|pty-get|pty-write|pty-stop|pty-stream|upload-file|download-file|list-files|search-files|delete-file|stat-file|mkdir|move-file|git-status|git-diff|git-branch|git-commit|git-pull|git-push|smoke> [args]",
   );
 }
 
@@ -7494,6 +7996,16 @@ async function main() {
 
   if (command === "organization" || command === "organizations") {
     await runOrganizationsCommand(options, rest);
+    return;
+  }
+
+  if (command === "project") {
+    await runProjectCommand(options, rest);
+    return;
+  }
+
+  if (command === "agent") {
+    await runAgentCommand(options, rest);
     return;
   }
 
