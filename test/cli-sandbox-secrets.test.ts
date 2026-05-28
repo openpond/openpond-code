@@ -174,6 +174,17 @@ describe("sandbox secret CLI output redaction", () => {
         "--sandbox-api-url",
         sandboxApiUrl,
       ]);
+      const projectUpdate = await runCli([
+        "project",
+        "update",
+        "project_test",
+        "--team-id",
+        "team_test",
+        "--description",
+        "Updated Project",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
       const agentCreate = await runCli([
         "agent",
         "create",
@@ -194,6 +205,17 @@ describe("sandbox secret CLI output redaction", () => {
         "--sandbox-api-url",
         sandboxApiUrl,
       ]);
+      const agentUpdate = await runCli([
+        "agent",
+        "update",
+        "agent_test",
+        "--team-id",
+        "team_test",
+        "--trigger-type",
+        "background",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
       const agentRun = await runCli([
         "agent",
         "run",
@@ -210,7 +232,9 @@ describe("sandbox secret CLI output redaction", () => {
 
       expect(projectList.code).toBe(0);
       expect(projectCreate.code).toBe(0);
+      expect(projectUpdate.code).toBe(0);
       expect(agentCreate.code).toBe(0);
+      expect(agentUpdate.code).toBe(0);
       expect(agentRun.code).toBe(0);
       expect(JSON.parse(projectList.stdout).projects[0]).toMatchObject({
         id: "project_test",
@@ -220,10 +244,18 @@ describe("sandbox secret CLI output redaction", () => {
         id: "project_test",
         sourceType: "internal_repo",
       });
+      expect(JSON.parse(projectUpdate.stdout).project).toMatchObject({
+        id: "project_test",
+        description: "Updated Project",
+      });
       expect(JSON.parse(agentCreate.stdout).agent).toMatchObject({
         id: "agent_test",
         projectId: "project_test",
         selectedEntrypoint: { scope: "action", name: "hello" },
+      });
+      expect(JSON.parse(agentUpdate.stdout).agent).toMatchObject({
+        id: "agent_test",
+        triggerType: "background",
       });
       expect(JSON.parse(agentRun.stdout).run).toMatchObject({
         id: "agent_run_test",
@@ -233,7 +265,9 @@ describe("sandbox secret CLI output redaction", () => {
       expect(requests.map((request) => request.url)).toEqual([
         "/v1/projects?teamId=team_test",
         "/v1/projects",
+        "/v1/projects/project_test?teamId=team_test",
         "/v1/agents",
+        "/v1/agents/agent_test?teamId=team_test",
         "/v1/agents/agent_test/run",
       ]);
       expect(requests[1]?.body).toMatchObject({
@@ -244,11 +278,17 @@ describe("sandbox secret CLI output redaction", () => {
         gitRepo: "demo-project",
       });
       expect(requests[2]?.body).toMatchObject({
+        description: "Updated Project",
+      });
+      expect(requests[3]?.body).toMatchObject({
         teamId: "team_test",
         projectId: "project_test",
         selectedEntrypoint: { scope: "action", name: "hello" },
       });
-      expect(requests[3]?.body).toMatchObject({
+      expect(requests[4]?.body).toMatchObject({
+        triggerType: "background",
+      });
+      expect(requests[5]?.body).toMatchObject({
         teamId: "team_test",
         idempotencyKey: "run_key",
         input: { message: "hello" },
@@ -274,6 +314,10 @@ describe("sandbox secret CLI output redaction", () => {
         name: "SDK Project",
         sourceType: "manual",
       });
+      const projectUpdated = await client.projects.update(project.id, {
+        teamId: "team_test",
+        description: "Updated SDK Project",
+      });
       const agent = await client.agents.upsert({
         teamId: "team_test",
         projectId: project.id,
@@ -286,6 +330,10 @@ describe("sandbox secret CLI output redaction", () => {
         name: "SDK Agent",
         selectedEntrypoint: { scope: "entire_manifest" },
       });
+      const agentUpdated = await client.agents.update(agent.id, {
+        teamId: "team_test",
+        triggerType: "background",
+      });
       const result = await client.agents.run(agent.id, {
         teamId: "team_test",
         idempotencyKey: "sdk_run",
@@ -293,8 +341,10 @@ describe("sandbox secret CLI output redaction", () => {
 
       expect(project).toMatchObject({ id: "project_test", teamId: "team_test" });
       expect(projectAgain.id).toBe(project.id);
+      expect(projectUpdated.description).toBe("Updated SDK Project");
       expect(agent).toMatchObject({ id: "agent_test", projectId: "project_test" });
       expect(agentAgain.id).toBe(agent.id);
+      expect(agentUpdated.triggerType).toBe("background");
       expect(result.run).toMatchObject({
         id: "agent_run_test",
         agentId: "agent_test",
@@ -302,14 +352,20 @@ describe("sandbox secret CLI output redaction", () => {
       expect(requests.map((request) => request.url)).toEqual([
         "/v1/projects",
         "/v1/projects",
+        "/v1/projects/project_test?teamId=team_test",
         "/v1/agents",
         "/v1/agents",
+        "/v1/agents/agent_test?teamId=team_test",
         "/v1/agents/agent_test/run",
       ]);
       expect(requests[0]?.body).not.toHaveProperty("appId");
       expect(requests[1]?.body).not.toHaveProperty("appId");
+      expect(requests[2]?.body).toMatchObject({ description: "Updated SDK Project" });
       expect(requests[2]?.body).not.toHaveProperty("appId");
       expect(requests[3]?.body).not.toHaveProperty("appId");
+      expect(requests[4]?.body).not.toHaveProperty("appId");
+      expect(requests[5]?.body).toMatchObject({ triggerType: "background" });
+      expect(requests[5]?.body).not.toHaveProperty("appId");
     });
   });
 
@@ -1087,6 +1143,22 @@ async function withSandboxApi(
 
     if (
       request.url === "/v1/projects/project_test?teamId=team_test" &&
+      request.method === "PATCH"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          project: sandboxProjectRecord({
+            description:
+              typeof body.description === "string" ? body.description : null,
+          }),
+        }),
+      );
+      return;
+    }
+
+    if (
+      request.url === "/v1/projects/project_test?teamId=team_test" &&
       request.method === "DELETE"
     ) {
       response.writeHead(200, { "content-type": "application/json" });
@@ -1126,6 +1198,22 @@ async function withSandboxApi(
     ) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ agent: sandboxAgentRecord() }));
+      return;
+    }
+
+    if (
+      request.url === "/v1/agents/agent_test?teamId=team_test" &&
+      request.method === "PATCH"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          agent: sandboxAgentRecord({
+            triggerType:
+              body.triggerType === "background" ? "background" : "manual",
+          }),
+        }),
+      );
       return;
     }
 
@@ -1599,6 +1687,7 @@ function sandboxRuntimeRecord(
 function sandboxProjectRecord(
   overrides: {
     name?: string;
+    description?: string | null;
     status?: string;
     sourceType?: string;
     gitOwner?: string | null;
@@ -1611,7 +1700,7 @@ function sandboxProjectRecord(
     createdByUserId: "user_test",
     name: overrides.name ?? "Demo Project",
     slug: "demo-project",
-    description: null,
+    description: overrides.description ?? null,
     status: overrides.status ?? "active",
     sourceType: overrides.sourceType ?? "internal_repo",
     sourceConfig: {},
@@ -1645,6 +1734,7 @@ function sandboxAgentRecord(
   overrides: {
     name?: string;
     status?: string;
+    triggerType?: string;
     selectedEntrypoint?: Record<string, unknown>;
   } = {},
 ): Record<string, unknown> {
@@ -1662,7 +1752,7 @@ function sandboxAgentRecord(
       scope: "entire_manifest",
       name: null,
     },
-    triggerType: "manual",
+    triggerType: overrides.triggerType ?? "manual",
     endpointPolicy: {},
     backgroundTaskPolicy: {},
     defaultRuntimeMode: "attempt",

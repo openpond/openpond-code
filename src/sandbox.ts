@@ -1235,6 +1235,10 @@ export type SandboxProjectUpsertInput = {
   metadata?: Record<string, unknown>;
 };
 
+export type SandboxProjectUpdateInput = { teamId: string } & Partial<
+  Omit<SandboxProjectUpsertInput, "teamId">
+>;
+
 export type SandboxAgentUpsertInput = {
   teamId: string;
   projectId: string;
@@ -1260,6 +1264,10 @@ export type SandboxAgentUpsertInput = {
   externalId?: string | null;
   metadata?: Record<string, unknown>;
 };
+
+export type SandboxAgentUpdateInput = { teamId: string } & Partial<
+  Omit<SandboxAgentUpsertInput, "teamId">
+>;
 
 export type SandboxAgentRunInput = {
   teamId: string;
@@ -2054,6 +2062,8 @@ export class OpenPondSandboxClient {
     upsert: (input: SandboxProjectUpsertInput) => this.upsertProject(input),
     get: (projectId: string, input: { teamId: string }) =>
       this.getProject(projectId, input),
+    update: (projectId: string, input: SandboxProjectUpdateInput) =>
+      this.updateProject(projectId, input),
     sync: (projectId: string, input: { teamId: string }) =>
       this.syncProject(projectId, input),
     archive: (projectId: string, input: { teamId: string }) =>
@@ -2065,6 +2075,8 @@ export class OpenPondSandboxClient {
     upsert: (input: SandboxAgentUpsertInput) => this.upsertAgent(input),
     get: (agentId: string, input: { teamId: string }) =>
       this.getAgent(agentId, input),
+    update: (agentId: string, input: SandboxAgentUpdateInput) =>
+      this.updateAgent(agentId, input),
     archive: (agentId: string, input: { teamId: string }) =>
       this.archiveAgent(agentId, input),
     run: (agentId: string, input: SandboxAgentRunInput) =>
@@ -2258,6 +2270,21 @@ export class OpenPondSandboxClient {
     ).then((payload) => payload.project);
   }
 
+  updateProject(
+    projectId: string,
+    input: SandboxProjectUpdateInput,
+  ): Promise<SandboxProject> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    const { teamId: _teamId, ...body } = input;
+    return this.requestApiRoot<SandboxProjectResponse>(
+      `/projects/${encodeURIComponent(projectId)}?${query.toString()}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      },
+    ).then((payload) => payload.project);
+  }
+
   archiveProject(
     projectId: string,
     input: { teamId: string },
@@ -2298,6 +2325,21 @@ export class OpenPondSandboxClient {
     return this.requestApiRoot<SandboxAgentResponse>(
       `/agents/${encodeURIComponent(agentId)}?${query.toString()}`,
       { method: "DELETE" },
+    ).then((payload) => payload.agent);
+  }
+
+  updateAgent(
+    agentId: string,
+    input: SandboxAgentUpdateInput,
+  ): Promise<SandboxAgent> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    const { teamId: _teamId, ...body } = input;
+    return this.requestApiRoot<SandboxAgentResponse>(
+      `/agents/${encodeURIComponent(agentId)}?${query.toString()}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      },
     ).then((payload) => payload.agent);
   }
 

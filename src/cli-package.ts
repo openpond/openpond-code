@@ -71,6 +71,7 @@ import {
   type SandboxAgent,
   type SandboxAgentEntrypointScope,
   type SandboxAgentTriggerType,
+  type SandboxAgentUpdateInput,
   type SandboxAgentUpsertInput,
   type SandboxRuntime,
   type SandboxRuntimeCreateInput,
@@ -82,6 +83,7 @@ import {
   type SandboxIntegrationConnectionLeaseInput,
   type SandboxProject,
   type SandboxProjectSourceType,
+  type SandboxProjectUpdateInput,
   type SandboxProjectUpsertInput,
   type SandboxRecord,
   type SandboxReplayArtifact,
@@ -3034,10 +3036,12 @@ function printHelp(): void {
   console.log("  openpond project list --team-id <id>");
   console.log("  openpond project create --team-id <id> --name <name> [--source-type manual|github_repo|internal_repo|template] [--repo <url>] [--git-owner <owner> --git-repo <repo>] [--internal-repo-path <path>] [--template-repo-url <url>]");
   console.log("  openpond project get <projectId> --team-id <id>");
+  console.log("  openpond project update <projectId> --team-id <id> [--name <name>] [--description <text>] [--default-branch <branch>]");
   console.log("  openpond project sync <projectId> --team-id <id>");
   console.log("  openpond project archive <projectId> --team-id <id>");
   console.log("  openpond agent list --team-id <id>");
   console.log("  openpond agent create --team-id <id> --project-id <id> --name <name> [--entrypoint-scope entire_manifest|action|service|schedule] [--entrypoint-name <name>] [--trigger-type manual|schedule|endpoint|background] [--runtime-mode <mode>]");
+  console.log("  openpond agent update <agentId> --team-id <id> [--name <name>] [--trigger-type manual|schedule|endpoint|background] [--runtime-mode <mode>]");
   console.log("  openpond agent run <agentId> --team-id <id> [--idempotency-key <key>] [--input <json>]");
   console.log("  openpond agent archive <agentId> --team-id <id>");
   console.log("  openpond sandbox list [--env staging] [--team-id <id>] [--project-id <id>] [--agent-id <id>] [--sandbox-api-url <url>]");
@@ -4525,6 +4529,58 @@ function buildProjectUpsertInput(
   };
 }
 
+function buildProjectUpdateInput(
+  teamId: string,
+  options: Record<string, string | boolean>,
+): SandboxProjectUpdateInput {
+  const repoUrl = optionString(options, "repoUrl") || optionString(options, "repo");
+  const sourceConfig = optionalJsonObject(options, "sourceConfig", "source-config");
+  const metadata = optionalJsonObject(options, "metadata", "metadata");
+  return {
+    teamId,
+    ...(optionString(options, "name") ? { name: optionString(options, "name") } : {}),
+    ...(optionString(options, "slug") ? { slug: optionString(options, "slug") } : {}),
+    ...(optionString(options, "description")
+      ? { description: optionString(options, "description") }
+      : {}),
+    ...(options.status === "active" || options.status === "disabled" || options.status === "archived"
+      ? { status: options.status }
+      : {}),
+    ...(options.sourceType !== undefined ? { sourceType: parseProjectSourceType(options.sourceType) } : {}),
+    ...(sourceConfig || repoUrl
+      ? { sourceConfig: { ...(sourceConfig ?? {}), ...(repoUrl ? { repoUrl } : {}) } }
+      : {}),
+    ...(optionString(options, "normalizedSourceIdentity")
+      ? { normalizedSourceIdentity: optionString(options, "normalizedSourceIdentity") }
+      : {}),
+    ...(optionString(options, "externalId") ? { externalId: optionString(options, "externalId") } : {}),
+    ...(optionString(options, "gitProvider") ? { gitProvider: optionString(options, "gitProvider") } : {}),
+    ...(optionString(options, "gitHost") ? { gitHost: optionString(options, "gitHost") } : {}),
+    ...(optionString(options, "gitOwner") ? { gitOwner: optionString(options, "gitOwner") } : {}),
+    ...(optionString(options, "gitRepo") ? { gitRepo: optionString(options, "gitRepo") } : {}),
+    ...(optionString(options, "gitBranch") ? { gitBranch: optionString(options, "gitBranch") } : {}),
+    ...(optionString(options, "defaultBranch")
+      ? { defaultBranch: optionString(options, "defaultBranch") }
+      : {}),
+    ...(optionString(options, "internalRepoPath")
+      ? { internalRepoPath: optionString(options, "internalRepoPath") }
+      : {}),
+    ...(optionString(options, "templateSourceProjectId")
+      ? { templateSourceProjectId: optionString(options, "templateSourceProjectId") }
+      : {}),
+    ...(optionString(options, "templateRepoUrl")
+      ? { templateRepoUrl: optionString(options, "templateRepoUrl") }
+      : {}),
+    ...(optionString(options, "templateBranch")
+      ? { templateBranch: optionString(options, "templateBranch") }
+      : {}),
+    ...(optionString(options, "templateRemoteSha")
+      ? { templateRemoteSha: optionString(options, "templateRemoteSha") }
+      : {}),
+    ...(metadata ? { metadata } : {}),
+  };
+}
+
 function buildAgentUpsertInput(
   options: Record<string, string | boolean>,
 ): SandboxAgentUpsertInput {
@@ -4547,6 +4603,82 @@ function buildAgentUpsertInput(
     teamId,
     projectId,
     name,
+    ...(optionString(options, "slug") ? { slug: optionString(options, "slug") } : {}),
+    ...(optionString(options, "description")
+      ? { description: optionString(options, "description") }
+      : {}),
+    ...(options.status === "active" || options.status === "disabled" || options.status === "archived"
+      ? { status: options.status }
+      : {}),
+    ...(entrypointScope
+      ? { selectedEntrypoint: { scope: entrypointScope, name: entrypointName || null } }
+      : {}),
+    ...(triggerType ? { triggerType } : {}),
+    ...(runtimeMode ? { defaultRuntimeMode: runtimeMode } : {}),
+    ...(optionString(options, "defaultBranch")
+      ? { defaultBranch: optionString(options, "defaultBranch") }
+      : {}),
+    ...(optionString(options, "sourceRefOverride")
+      ? { sourceRefOverride: optionString(options, "sourceRefOverride") }
+      : {}),
+    ...(promotionPolicy ? { defaultPromotionPolicy: promotionPolicy } : {}),
+    ...(optionalJsonObject(options, "endpointPolicy", "endpoint-policy")
+      ? { endpointPolicy: optionalJsonObject(options, "endpointPolicy", "endpoint-policy") }
+      : {}),
+    ...(optionalJsonObject(options, "backgroundTaskPolicy", "background-task-policy")
+      ? {
+          backgroundTaskPolicy: optionalJsonObject(
+            options,
+            "backgroundTaskPolicy",
+            "background-task-policy",
+          ),
+        }
+      : {}),
+    ...(optionalJsonObject(options, "resourcePolicy", "resource-policy")
+      ? { defaultResourcePolicy: optionalJsonObject(options, "resourcePolicy", "resource-policy") }
+      : {}),
+    ...(optionalJsonObject(options, "lifecyclePolicy", "lifecycle-policy")
+      ? { defaultLifecyclePolicy: optionalJsonObject(options, "lifecyclePolicy", "lifecycle-policy") }
+      : {}),
+    ...(optionalJsonObject(options, "checkpointPolicy", "checkpoint-policy")
+      ? {
+          defaultCheckpointPolicy: optionalJsonObject(
+            options,
+            "checkpointPolicy",
+            "checkpoint-policy",
+          ),
+        }
+      : {}),
+    ...(parseCsvOption(options.requiredIntegrations).length > 0
+      ? { requiredIntegrationRefs: parseCsvOption(options.requiredIntegrations) }
+      : {}),
+    ...(parseCsvOption(options.requiredEnv).length > 0
+      ? { requiredEnvironmentVariableRefs: parseCsvOption(options.requiredEnv) }
+      : {}),
+    ...(optionalJsonObject(options, "schedulePolicy", "schedule-policy")
+      ? { schedulePolicy: optionalJsonObject(options, "schedulePolicy", "schedule-policy") }
+      : {}),
+    ...(optionString(options, "externalId") ? { externalId: optionString(options, "externalId") } : {}),
+    ...(metadata ? { metadata } : {}),
+  };
+}
+
+function buildAgentUpdateInput(
+  teamId: string,
+  options: Record<string, string | boolean>,
+): SandboxAgentUpdateInput {
+  const entrypointScope = parseAgentEntrypointScope(options.entrypointScope);
+  const entrypointName = optionString(options, "entrypointName");
+  const triggerType = parseAgentTriggerType(options.triggerType);
+  const runtimeMode = parseSandboxRuntimeModeOption(options.runtimeMode);
+  const promotionPolicy = parseSandboxRuntimePromotionPolicyOption(
+    options.runtimePromotionPolicy,
+  );
+  const metadata = optionalJsonObject(options, "metadata", "metadata");
+  return {
+    teamId,
+    ...(optionString(options, "projectId") ? { projectId: optionString(options, "projectId") } : {}),
+    ...(optionString(options, "name") ? { name: optionString(options, "name") } : {}),
     ...(optionString(options, "slug") ? { slug: optionString(options, "slug") } : {}),
     ...(optionString(options, "description")
       ? { description: optionString(options, "description") }
@@ -6098,6 +6230,20 @@ async function runProjectCommand(
     return;
   }
 
+  if (subcommand === "update") {
+    const projectId = rest[1]?.trim();
+    const teamId = requiredTeamId(options, "usage: project update <projectId>");
+    if (!projectId) {
+      throw new Error("usage: project update <projectId> --team-id <id>");
+    }
+    const project = await client.projects.update(
+      projectId,
+      buildProjectUpdateInput(teamId, options),
+    );
+    console.log(JSON.stringify({ project }, null, 2));
+    return;
+  }
+
   if (subcommand === "sync") {
     const projectId = rest[1]?.trim();
     const teamId = requiredTeamId(options, "usage: project sync <projectId>");
@@ -6121,7 +6267,7 @@ async function runProjectCommand(
   }
 
   throw new Error(
-    "usage: project <list|create|upsert|get|archive> [--team-id <id>] [--name <name>]",
+    "usage: project <list|create|upsert|get|update|sync|archive> [--team-id <id>] [--name <name>]",
   );
 }
 
@@ -6189,6 +6335,20 @@ async function runAgentCommand(
     return;
   }
 
+  if (subcommand === "update") {
+    const agentId = rest[1]?.trim();
+    const teamId = requiredTeamId(options, "usage: agent update <agentId>");
+    if (!agentId) {
+      throw new Error("usage: agent update <agentId> --team-id <id>");
+    }
+    const agent = await client.agents.update(
+      agentId,
+      buildAgentUpdateInput(teamId, options),
+    );
+    console.log(JSON.stringify({ agent }, null, 2));
+    return;
+  }
+
   if (subcommand === "archive") {
     const agentId = rest[1]?.trim();
     const teamId = requiredTeamId(options, "usage: agent archive <agentId>");
@@ -6201,7 +6361,7 @@ async function runAgentCommand(
   }
 
   throw new Error(
-    "usage: agent <list|create|upsert|get|run|archive> [--team-id <id>] [--project-id <id>] [--name <name>]",
+    "usage: agent <list|create|upsert|get|update|run|archive> [--team-id <id>] [--project-id <id>] [--name <name>]",
   );
 }
 
