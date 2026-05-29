@@ -1,4 +1,4 @@
-import { apiFetch, readApiJson } from "./api-core";
+import { apiFetch, readApiJson } from "./core";
 import type {
   DeploymentDetail,
   DeploymentLogEntry,
@@ -6,7 +6,7 @@ import type {
   PromotePreviewToProductionResponse,
   StartAppLifecycleRequest,
   StartAppLifecycleResponse,
-} from "./api-types";
+} from "./types";
 
 export async function commitFiles(
   baseUrl: string,
@@ -134,8 +134,8 @@ export async function getDeploymentLogs(
       typeof log.createdAt === "string"
         ? log.createdAt
         : log.createdAt instanceof Date
-          ? log.createdAt.toISOString()
-          : new Date().toISOString();
+        ? log.createdAt.toISOString()
+        : new Date().toISOString();
     return {
       id: typeof log.id === "string" ? log.id : `${Math.random()}`,
       type: typeof log.type === "string" ? log.type : undefined,
@@ -191,7 +191,9 @@ export async function getLatestDeploymentForApp(
   );
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`Latest deployment lookup failed: ${response.status} ${text}`);
+    throw new Error(
+      `Latest deployment lookup failed: ${response.status} ${text}`
+    );
   }
   const payload = (await response.json().catch(() => ({}))) as {
     deployment?: { id?: string; status?: string } | null;

@@ -1,12 +1,9 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 
-import {
-  chatRequest,
-  createLocalProject,
-} from "./api";
+import { chatRequest, createLocalProject } from "./api";
 import { saveConfig, type LocalConfig } from "./config";
-import { loadHistory, saveHistory, type HistoryEntry } from "./history";
+import { loadHistory, saveHistory, type HistoryEntry } from "./history/store";
 import { getGitHash } from "./hash";
 import { consumeStream } from "./stream";
 import type {
@@ -17,9 +14,7 @@ import type {
 } from "./types";
 import { executeLocalTool } from "./tools";
 
-type LoginState =
-  | { status: "idle" }
-  | { status: "ready"; token: string };
+type LoginState = { status: "idle" } | { status: "ready"; token: string };
 
 export type ChatWorkerEvents = {
   onLine: (text: string) => void;
@@ -49,7 +44,11 @@ export class ChatWorker {
   private historyStartedAt = new Date().toISOString();
   private gitHash: string | null = null;
 
-  constructor(baseUrl: string, initialConfig: LocalConfig, events: ChatWorkerEvents) {
+  constructor(
+    baseUrl: string,
+    initialConfig: LocalConfig,
+    events: ChatWorkerEvents
+  ) {
     this.baseUrl = baseUrl;
     this.config = initialConfig;
     this.events = events;
@@ -110,7 +109,9 @@ export class ChatWorker {
     });
   }
 
-  private async persistConfig(overrides: Partial<LocalConfig> = {}): Promise<void> {
+  private async persistConfig(
+    overrides: Partial<LocalConfig> = {}
+  ): Promise<void> {
     this.config = { ...this.config, ...overrides };
     await saveConfig(this.config);
   }
@@ -151,7 +152,10 @@ export class ChatWorker {
   private runOpentoolInit(name?: string): void {
     const localPath = process.env.OPENTOOL_PATH;
     const resolved = localPath
-      ? { command: "node", args: [path.join(localPath, "dist", "cli", "index.js")] }
+      ? {
+          command: "node",
+          args: [path.join(localPath, "dist", "cli", "index.js")],
+        }
       : { command: "npx", args: ["opentool"] };
     const args = [...resolved.args, "init"];
     if (name) args.push("--name", name);
@@ -201,7 +205,9 @@ export class ChatWorker {
         }
         const token = this.token();
         if (!token) {
-          this.appendLine("api key required to create app. Run `openpond login` first.");
+          this.appendLine(
+            "api key required to create app. Run `openpond login` first."
+          );
           return;
         }
         const result = await createLocalProject(this.baseUrl, token, name);
@@ -240,7 +246,9 @@ export class ChatWorker {
         this.appendLine("api key already configured");
         return;
       }
-      this.appendLine("Run `openpond login` in a terminal to save an API key, then reopen this chat.");
+      this.appendLine(
+        "Run `openpond login` in a terminal to save an API key, then reopen this chat."
+      );
       return;
     }
 
@@ -258,7 +266,9 @@ export class ChatWorker {
 
     if (command === "update") {
       if (this.chatMode !== "general") {
-        this.appendLine("update is only available in chat mode. Use /mode chat.");
+        this.appendLine(
+          "update is only available in chat mode. Use /mode chat."
+        );
         return;
       }
       const appId = rest[0];
@@ -267,7 +277,9 @@ export class ChatWorker {
         return;
       }
       const request = rest.slice(1).join(" ").trim();
-      const outbound = request ? `/update ${appId} ${request}` : `/update ${appId}`;
+      const outbound = request
+        ? `/update ${appId} ${request}`
+        : `/update ${appId}`;
       await this.sendMessage(outbound);
       return;
     }
@@ -275,7 +287,9 @@ export class ChatWorker {
     if (command === "link") {
       const token = this.token();
       if (!token) {
-        this.appendLine("api key required to link app. Run `openpond login` first.");
+        this.appendLine(
+          "api key required to link app. Run `openpond login` first."
+        );
         return;
       }
       const sub = rest[0];
@@ -333,7 +347,9 @@ export class ChatWorker {
       return;
     }
     const isBuilder = this.chatMode === "builder";
-    const executionMode = isBuilder ? this.config.executionMode ?? "local" : undefined;
+    const executionMode = isBuilder
+      ? this.config.executionMode ?? "local"
+      : undefined;
     const userItem: ResponseItem = {
       type: "message",
       role: "user",
@@ -511,11 +527,17 @@ export class ChatWorker {
 
     const outputText = this.formatCompact(output.output);
     const errorText = this.formatCompact(output.error);
-    const parts = [`tool_output: ${toolCall.name} (${output.ok ? "ok" : "error"})`];
+    const parts = [
+      `tool_output: ${toolCall.name} (${output.ok ? "ok" : "error"})`,
+    ];
     if (errorText) parts.push(`error=${errorText}`);
     if (!errorText && outputText) parts.push(`output=${outputText}`);
     this.appendLine(parts.join(" "));
-    await this.recordHistory("tool", "tool_output", String(output.output ?? ""));
+    await this.recordHistory(
+      "tool",
+      "tool_output",
+      String(output.output ?? "")
+    );
     await this.sendToolResult(toolOutput);
   }
 
@@ -527,7 +549,11 @@ export class ChatWorker {
         return `${role}: ${this.formatMarkdown(rawContent)}`;
       }
       const blocks = Array.isArray(rawContent)
-        ? (rawContent as Array<{ text?: string; content?: string; value?: string }>)
+        ? (rawContent as Array<{
+            text?: string;
+            content?: string;
+            value?: string;
+          }>)
         : [];
       const text = blocks
         .map((block) => {
@@ -562,20 +588,25 @@ export class ChatWorker {
       const ok = (item as any).ok !== false;
       if (name === "create_tool" || name === "update_tool") {
         const payload =
-          typeof (item as any).output === "object" && (item as any).output !== null
+          typeof (item as any).output === "object" &&
+          (item as any).output !== null
             ? ((item as any).output as Record<string, unknown>)
             : {};
         const appId = typeof payload.appId === "string" ? payload.appId : null;
-        const appName = typeof payload.appName === "string" ? payload.appName : null;
+        const appName =
+          typeof payload.appName === "string" ? payload.appName : null;
         const conversationId =
-          typeof payload.conversationId === "string" ? payload.conversationId : null;
+          typeof payload.conversationId === "string"
+            ? payload.conversationId
+            : null;
         const builderLink =
           typeof payload.builderLink === "string"
             ? payload.builderLink
             : conversationId
-              ? `/builder/${conversationId}`
-              : null;
-        const status = typeof payload.status === "string" ? payload.status : null;
+            ? `/builder/${conversationId}`
+            : null;
+        const status =
+          typeof payload.status === "string" ? payload.status : null;
         const requestRaw =
           typeof payload.request === "string" ? payload.request : null;
         const requestPreview = requestRaw
@@ -585,8 +616,8 @@ export class ChatWorker {
           typeof payload.action === "string"
             ? payload.action
             : name === "create_tool"
-              ? "create"
-              : "update";
+            ? "create"
+            : "update";
         const label = appName || appId || "Builder session";
         const parts = [`builder ${action}: ${label}`];
         if (status) parts.push(`status=${status}`);
@@ -619,9 +650,13 @@ export class ChatWorker {
     }
     if (item.type === "app_created") {
       const appId =
-        typeof (item as any).appId === "string" ? (item as any).appId : "unknown";
+        typeof (item as any).appId === "string"
+          ? (item as any).appId
+          : "unknown";
       const name =
-        typeof (item as any).appName === "string" ? (item as any).appName : null;
+        typeof (item as any).appName === "string"
+          ? (item as any).appName
+          : null;
       return name ? `app_created: ${name} (${appId})` : `app_created: ${appId}`;
     }
     if (item.type.startsWith("tool_creation_")) {
@@ -745,11 +780,13 @@ export class ChatWorker {
         typeof rawContent === "string"
           ? rawContent
           : Array.isArray(rawContent)
-            ? rawContent
-                .map((block: any) => block.text || block.content || block.value || "")
-                .filter((val: string) => val.length > 0)
-                .join("\n")
-            : "";
+          ? rawContent
+              .map(
+                (block: any) => block.text || block.content || block.value || ""
+              )
+              .filter((val: string) => val.length > 0)
+              .join("\n")
+          : "";
       if (text) {
         await this.recordHistory(role, "message", text);
       }
@@ -764,5 +801,4 @@ export class ChatWorker {
       await this.recordHistory("tool", "tool_output", "ok");
     }
   }
-
 }

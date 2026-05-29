@@ -2,7 +2,12 @@ import { promises as fs, constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { LspClient } from "./lsp";
-import { commitFiles, deployApp, fetchToolManifest, type ToolManifest } from "./api";
+import {
+  commitFiles,
+  deployApp,
+  fetchToolManifest,
+  type ToolManifest,
+} from "./api";
 
 export type ToolExecutionContext = {
   rootDir: string;
@@ -27,7 +32,10 @@ type ToolCall = {
 const manifestCache = new Map<string, Promise<ToolManifest>>();
 const allowedToolsCache = new Map<string, Promise<Set<string>>>();
 
-async function getAllowedTools(baseUrl: string, token: string): Promise<Set<string>> {
+async function getAllowedTools(
+  baseUrl: string,
+  token: string
+): Promise<Set<string>> {
   const cacheKey = baseUrl.replace(/\/$/, "");
   if (!allowedToolsCache.has(cacheKey)) {
     const manifestPromise =
@@ -58,7 +66,10 @@ function ensureReadBeforeWrite(readSet: Set<string>, filePath: string) {
   }
 }
 
-async function readFileTool(ctx: ToolExecutionContext, args: Record<string, unknown>) {
+async function readFileTool(
+  ctx: ToolExecutionContext,
+  args: Record<string, unknown>
+) {
   const filePath = String(args.path || "");
   if (!filePath) throw new Error("path is required");
   const resolved = resolvePath(ctx.rootDir, filePath);
@@ -74,7 +85,10 @@ async function readFileTool(ctx: ToolExecutionContext, args: Record<string, unkn
   return { path: filePath, content };
 }
 
-async function listFilesTool(ctx: ToolExecutionContext, args: Record<string, unknown>) {
+async function listFilesTool(
+  ctx: ToolExecutionContext,
+  args: Record<string, unknown>
+) {
   const pattern = String(args.pattern || "**/*");
   const glob = new Bun.Glob(pattern);
   const matches: string[] = [];
@@ -84,7 +98,10 @@ async function listFilesTool(ctx: ToolExecutionContext, args: Record<string, unk
   return { pattern, matches };
 }
 
-async function grepTool(ctx: ToolExecutionContext, args: Record<string, unknown>) {
+async function grepTool(
+  ctx: ToolExecutionContext,
+  args: Record<string, unknown>
+) {
   const query = String(args.query || "");
   const pattern = String(args.pattern || ".");
   if (!query) throw new Error("query is required");
@@ -113,7 +130,10 @@ function parsePatchPaths(patchText: string): string[] {
   return paths;
 }
 
-async function applyPatchTool(ctx: ToolExecutionContext, args: Record<string, unknown>) {
+async function applyPatchTool(
+  ctx: ToolExecutionContext,
+  args: Record<string, unknown>
+) {
   const patchText = String(args.patch || "");
   if (!patchText) throw new Error("patch is required");
   const touched = parsePatchPaths(patchText);
@@ -135,12 +155,26 @@ async function applyPatchTool(ctx: ToolExecutionContext, args: Record<string, un
   if (code !== 0) {
     throw new Error(stderr || "git apply failed");
   }
-  const files: Array<{ path: string; before: string; after: string; diff: string }> = [];
+  const files: Array<{
+    path: string;
+    before: string;
+    after: string;
+    diff: string;
+  }> = [];
   for (const filePath of touched) {
     const resolved = resolvePath(ctx.rootDir, filePath);
     const content = await fs.readFile(resolved, "utf-8");
-    const diff = await createUnifiedDiff(beforeMap[filePath] ?? "", content, filePath);
-    files.push({ path: filePath, before: beforeMap[filePath] ?? "", after: content, diff });
+    const diff = await createUnifiedDiff(
+      beforeMap[filePath] ?? "",
+      content,
+      filePath
+    );
+    files.push({
+      path: filePath,
+      before: beforeMap[filePath] ?? "",
+      after: content,
+      diff,
+    });
     if (ctx.lsp) {
       try {
         await ctx.lsp.syncFile(resolved, content);
@@ -152,7 +186,10 @@ async function applyPatchTool(ctx: ToolExecutionContext, args: Record<string, un
   return { files };
 }
 
-async function writeFileTool(ctx: ToolExecutionContext, args: Record<string, unknown>) {
+async function writeFileTool(
+  ctx: ToolExecutionContext,
+  args: Record<string, unknown>
+) {
   const filePath = String(args.path || "");
   const content = String(args.content || "");
   if (!filePath) throw new Error("path is required");
@@ -213,8 +250,12 @@ async function createUnifiedDiff(
   return stdout.trim();
 }
 
-async function collectChangedFiles(rootDir: string): Promise<Record<string, string>> {
-  const proc = Bun.spawn(["git", "status", "--porcelain", "-uall"], { cwd: rootDir });
+async function collectChangedFiles(
+  rootDir: string
+): Promise<Record<string, string>> {
+  const proc = Bun.spawn(["git", "status", "--porcelain", "-uall"], {
+    cwd: rootDir,
+  });
   const stdout = await new Response(proc.stdout).text();
   const stderr = await new Response(proc.stderr).text();
   const code = await proc.exited;
@@ -240,10 +281,19 @@ async function collectChangedFiles(rootDir: string): Promise<Record<string, stri
   return files;
 }
 
-async function deployTool(ctx: ToolExecutionContext, args: Record<string, unknown>) {
+async function deployTool(
+  ctx: ToolExecutionContext,
+  args: Record<string, unknown>
+) {
   const message = String(args.message || "Deploy from TUI");
   const files = await collectChangedFiles(ctx.rootDir);
-  const commit = await commitFiles(ctx.baseUrl, ctx.token, ctx.appId, files, message);
+  const commit = await commitFiles(
+    ctx.baseUrl,
+    ctx.token,
+    ctx.appId,
+    files,
+    message
+  );
   const deployment = await deployApp(ctx.baseUrl, ctx.token, ctx.appId);
   return {
     commitSha: commit.commitSha,

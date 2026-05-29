@@ -1,68 +1,56 @@
-import type { ChatRequestBody } from "./types";
-import { apiFetch, readApiJson } from "./api-core";
-export { apiFetch } from "./api-core";
+import { apiFetch, readApiJson } from "./api/core";
 import type {
-  ToolManifest,
+  AgentCreateRequest,
+  AppCodeVisibilityUpdateResponse,
+  AppEnvironmentGetResponse,
+  AppEnvironmentUpdateRequest,
+  AppEnvironmentUpdateResponse,
+  AppExecutionTimelineResponse,
+  AppListItem,
+  AppRuntimeSummary,
+  AppSchedulesResponse,
+  AssistantRunRequest,
+  AssistantRunResponse,
+  BacktestRunRequest,
   CreateLocalProjectInput,
   CreateRepoRequest,
   CreateRepoResponse,
   HeadlessAppRequest,
-  HeadlessAppResponse,
   HeadlessAppsResponse,
-  TemplateStatusResponse,
-  TemplateBranchesResponse,
-  TemplateDeployLatestRequest,
-  TemplateDeployLatestResponse,
-  AppEnvironmentUpdateRequest,
-  AppEnvironmentUpdateResponse,
-  AppEnvironmentGetResponse,
-  AppCodeVisibilityUpdateResponse,
-  AppScheduleSummary,
-  AppListItem,
-  AppRuntimeSummary,
-  ScheduleExecutionStatus,
-  AppSchedule,
-  AppSchedulesResponse,
-  OpenToolRecipeDomain,
-  OpenToolRecipeSummary,
+  OpenPondAccount,
+  OpenPondAccountBalanceResponse,
+  OpenPondAccountResponse,
+  OpenPondApiHealth,
+  OpenPondApiHealthResponse,
+  OpenToolRecipe,
+  OpenToolRecipeGetRequest,
   OpenToolRecipeListRequest,
   OpenToolRecipeListResponse,
   OpenToolRecipeSearchRequest,
   OpenToolRecipeSearchResponse,
-  OpenToolRecipeGetRequest,
-  OpenToolRecipe,
   OpenToolRulesGetRequest,
   OpenToolRulesGetResponse,
-  ScheduleToggleRequest,
-  ScheduleToggleResult,
-  ScheduleRunNowRequest,
-  ScheduleRunNowResponse,
   ScheduleDeleteResponse,
-  PromotePreviewToProductionRequest,
-  PromotePreviewToProductionResponse,
-  StartAppLifecycleRequest,
-  StartAppLifecycleResponse,
   ScheduleExecutionLog,
   ScheduleExecutionLogsResponse,
-  AppExecutionDeployment,
-  AppExecutionToolRun,
-  AppExecutionTimelineResponse,
-  OpenPondAccountProduct,
-  OpenPondAccount,
-  OpenPondAccountResponse,
-  OpenPondAccountBalanceResponse,
-  OpenPondApiHealthResponse,
-  OpenPondApiHealth,
-  AssistantMode,
-  AssistantRunRequest,
-  AssistantRunResponse,
-  AgentCreateRequest,
-  BacktestRunRequest,
-  DeploymentLogEntry,
-  DeploymentDetail,
+  ScheduleRunNowRequest,
+  ScheduleRunNowResponse,
+  ScheduleToggleRequest,
+  ScheduleToggleResult,
+  TemplateBranchesResponse,
+  TemplateDeployLatestRequest,
+  TemplateDeployLatestResponse,
+  TemplateStatusResponse,
   ToolExecuteRequest,
   ToolExecuteResponse,
-} from "./api-types";
+  ToolManifest,
+} from "./api/types";
+import type { ChatRequestBody } from "./types";
+import {
+  DEFAULT_OPENPOND_API_BASE_URL,
+  DEFAULT_OPENPOND_WEB_BASE_URL,
+} from "./urls";
+export { apiFetch } from "./api/core";
 export {
   commitFiles,
   deployApp,
@@ -72,76 +60,74 @@ export {
   getLatestDeploymentForApp,
   promotePreviewToProduction,
   startAppLifecycle,
-} from "./api-deployments";
+} from "./api/deployments";
 export type {
-  ToolManifest,
+  AgentCreateRequest,
+  AppCodeVisibilityUpdateResponse,
+  AppEnvironmentGetResponse,
+  AppEnvironmentUpdateRequest,
+  AppEnvironmentUpdateResponse,
+  AppExecutionDeployment,
+  AppExecutionTimelineResponse,
+  AppExecutionToolRun,
+  AppListItem,
+  AppRuntimeSummary,
+  AppSchedule,
+  AppSchedulesResponse,
+  AppScheduleSummary,
+  AssistantMode,
+  AssistantRunRequest,
+  AssistantRunResponse,
+  BacktestRunRequest,
   CreateLocalProjectInput,
   CreateRepoRequest,
   CreateRepoResponse,
+  DeploymentDetail,
+  DeploymentLogEntry,
   HeadlessAppRequest,
   HeadlessAppResponse,
   HeadlessAppsResponse,
-  TemplateStatusResponse,
-  TemplateBranchesResponse,
-  TemplateDeployLatestRequest,
-  TemplateDeployLatestResponse,
-  AppEnvironmentUpdateRequest,
-  AppEnvironmentUpdateResponse,
-  AppEnvironmentGetResponse,
-  AppCodeVisibilityUpdateResponse,
-  AppScheduleSummary,
-  AppListItem,
-  AppRuntimeSummary,
-  ScheduleExecutionStatus,
-  AppSchedule,
-  AppSchedulesResponse,
+  OpenPondAccount,
+  OpenPondAccountBalanceResponse,
+  OpenPondAccountProduct,
+  OpenPondAccountResponse,
+  OpenPondApiHealth,
+  OpenPondApiHealthResponse,
+  OpenToolRecipe,
   OpenToolRecipeDomain,
-  OpenToolRecipeSummary,
+  OpenToolRecipeGetRequest,
   OpenToolRecipeListRequest,
   OpenToolRecipeListResponse,
   OpenToolRecipeSearchRequest,
   OpenToolRecipeSearchResponse,
-  OpenToolRecipeGetRequest,
-  OpenToolRecipe,
+  OpenToolRecipeSummary,
   OpenToolRulesGetRequest,
   OpenToolRulesGetResponse,
-  ScheduleToggleRequest,
-  ScheduleToggleResult,
-  ScheduleRunNowRequest,
-  ScheduleRunNowResponse,
-  ScheduleDeleteResponse,
   PromotePreviewToProductionRequest,
   PromotePreviewToProductionResponse,
-  StartAppLifecycleRequest,
-  StartAppLifecycleResponse,
+  ScheduleDeleteResponse,
   ScheduleExecutionLog,
   ScheduleExecutionLogsResponse,
-  AppExecutionDeployment,
-  AppExecutionToolRun,
-  AppExecutionTimelineResponse,
-  OpenPondAccountProduct,
-  OpenPondAccount,
-  OpenPondAccountResponse,
-  OpenPondAccountBalanceResponse,
-  OpenPondApiHealthResponse,
-  OpenPondApiHealth,
-  AssistantMode,
-  AssistantRunRequest,
-  AssistantRunResponse,
-  AgentCreateRequest,
-  BacktestRunRequest,
-  DeploymentLogEntry,
-  DeploymentDetail,
+  ScheduleExecutionStatus,
+  ScheduleRunNowRequest,
+  ScheduleRunNowResponse,
+  ScheduleToggleRequest,
+  ScheduleToggleResult,
+  StartAppLifecycleRequest,
+  StartAppLifecycleResponse,
+  TemplateBranchesResponse,
+  TemplateDeployLatestRequest,
+  TemplateDeployLatestResponse,
+  TemplateStatusResponse,
   ToolExecuteRequest,
   ToolExecuteResponse,
-} from "./api-types";
-import {
-  DEFAULT_OPENPOND_API_BASE_URL,
-  DEFAULT_OPENPOND_WEB_BASE_URL,
-} from "./urls";
+  ToolManifest,
+} from "./api/types";
 
-const DEFAULT_OPENPOND_API_HOST = new URL(DEFAULT_OPENPOND_API_BASE_URL).hostname;
-const DEFAULT_OPENPOND_WEB_HOST = new URL(DEFAULT_OPENPOND_WEB_BASE_URL).hostname;
+const DEFAULT_OPENPOND_API_HOST = new URL(DEFAULT_OPENPOND_API_BASE_URL)
+  .hostname;
+const DEFAULT_OPENPOND_WEB_HOST = new URL(DEFAULT_OPENPOND_WEB_BASE_URL)
+  .hostname;
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   const parts = token.split(".");
@@ -163,7 +149,12 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
 export async function listApps(
   apiBase: string,
   token: string,
-  options?: { handle?: string; limit?: number; offset?: number; includeScheduled?: boolean }
+  options?: {
+    handle?: string;
+    limit?: number;
+    offset?: number;
+    includeScheduled?: boolean;
+  }
 ): Promise<AppListItem[]> {
   const params = new URLSearchParams();
   if (options?.handle) {
@@ -244,7 +235,9 @@ export async function updateAppCodeVisibility(
   );
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`Code visibility update failed: ${response.status} ${text}`);
+    throw new Error(
+      `Code visibility update failed: ${response.status} ${text}`
+    );
   }
   return (await response.json()) as AppCodeVisibilityUpdateResponse;
 }
@@ -409,8 +402,12 @@ export async function listAppSchedules(
     const text = await response.text().catch(() => "");
     throw new Error(`Schedules lookup failed: ${response.status} ${text}`);
   }
-  const payload = (await response.json().catch(() => ({}))) as Partial<AppSchedulesResponse>;
-  return { schedules: Array.isArray(payload.schedules) ? payload.schedules : [] };
+  const payload = (await response
+    .json()
+    .catch(() => ({}))) as Partial<AppSchedulesResponse>;
+  return {
+    schedules: Array.isArray(payload.schedules) ? payload.schedules : [],
+  };
 }
 
 export async function listOpenToolRecipes(
@@ -420,14 +417,23 @@ export async function listOpenToolRecipes(
 ): Promise<OpenToolRecipeListResponse> {
   const params = new URLSearchParams();
   if (input.domain) params.set("domain", input.domain);
-  if (input.opentoolVersion) params.set("opentoolVersion", input.opentoolVersion);
+  if (input.opentoolVersion)
+    params.set("opentoolVersion", input.opentoolVersion);
   if (typeof input.limit === "number") params.set("limit", String(input.limit));
   for (const tag of input.tags ?? []) params.append("tag", tag);
   const query = params.toString();
-  const response = await apiFetch(baseUrl, token, `/v1/opentool/recipes${query ? `?${query}` : ""}`, {
-    method: "GET",
-  });
-  return readApiJson<OpenToolRecipeListResponse>(response, "OpenTool recipe list");
+  const response = await apiFetch(
+    baseUrl,
+    token,
+    `/v1/opentool/recipes${query ? `?${query}` : ""}`,
+    {
+      method: "GET",
+    }
+  );
+  return readApiJson<OpenToolRecipeListResponse>(
+    response,
+    "OpenTool recipe list"
+  );
 }
 
 export async function searchOpenToolRecipes(
@@ -435,11 +441,19 @@ export async function searchOpenToolRecipes(
   token: string,
   input: OpenToolRecipeSearchRequest
 ): Promise<OpenToolRecipeSearchResponse> {
-  const response = await apiFetch(baseUrl, token, "/v1/opentool/recipes/search", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-  return readApiJson<OpenToolRecipeSearchResponse>(response, "OpenTool recipe search");
+  const response = await apiFetch(
+    baseUrl,
+    token,
+    "/v1/opentool/recipes/search",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    }
+  );
+  return readApiJson<OpenToolRecipeSearchResponse>(
+    response,
+    "OpenTool recipe search"
+  );
 }
 
 export async function getOpenToolRecipe(
@@ -448,14 +462,19 @@ export async function getOpenToolRecipe(
   input: OpenToolRecipeGetRequest
 ): Promise<OpenToolRecipe> {
   const params = new URLSearchParams();
-  if (typeof input.includeExamples === "boolean") params.set("includeExamples", String(input.includeExamples));
-  if (typeof input.includeTests === "boolean") params.set("includeTests", String(input.includeTests));
-  if (input.opentoolVersion) params.set("opentoolVersion", input.opentoolVersion);
+  if (typeof input.includeExamples === "boolean")
+    params.set("includeExamples", String(input.includeExamples));
+  if (typeof input.includeTests === "boolean")
+    params.set("includeTests", String(input.includeTests));
+  if (input.opentoolVersion)
+    params.set("opentoolVersion", input.opentoolVersion);
   const query = params.toString();
   const response = await apiFetch(
     baseUrl,
     token,
-    `/v1/opentool/recipes/${encodeURIComponent(input.id)}${query ? `?${query}` : ""}`,
+    `/v1/opentool/recipes/${encodeURIComponent(input.id)}${
+      query ? `?${query}` : ""
+    }`,
     { method: "GET" }
   );
   return readApiJson<OpenToolRecipe>(response, "OpenTool recipe get");
@@ -482,7 +501,9 @@ function buildLimitQuery(limit?: number): string {
   return query ? `?${query}` : "";
 }
 
-function normalizeScheduleExecutionLogs(payload: unknown): ScheduleExecutionLog[] {
+function normalizeScheduleExecutionLogs(
+  payload: unknown
+): ScheduleExecutionLog[] {
   if (Array.isArray(payload)) {
     return payload as ScheduleExecutionLog[];
   }
@@ -517,7 +538,9 @@ export async function startAppSchedules(
   input?: ScheduleToggleRequest
 ): Promise<ScheduleToggleResult> {
   const body = {
-    ...(input?.preferredScheduleId ? { preferredScheduleId: input.preferredScheduleId } : {}),
+    ...(input?.preferredScheduleId
+      ? { preferredScheduleId: input.preferredScheduleId }
+      : {}),
     ...(input?.scheduleId ? { scheduleId: input.scheduleId } : {}),
     ...(input?.startAt ? { startAt: input.startAt } : {}),
     ...(input && "endAt" in input ? { endAt: input.endAt ?? null } : {}),
@@ -555,10 +578,15 @@ export async function stopCurrentAppSchedules(
   baseUrl: string,
   token: string
 ): Promise<ScheduleToggleResult> {
-  const response = await apiFetch(baseUrl, token, "/apps/schedules/current/stop", {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
+  const response = await apiFetch(
+    baseUrl,
+    token,
+    "/apps/schedules/current/stop",
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    }
+  );
   return readApiJson<ScheduleToggleResult>(response, "Current schedule stop");
 }
 
@@ -583,7 +611,9 @@ export async function deleteOrArchiveSchedule(
   const response = await apiFetch(
     baseUrl,
     token,
-    `/apps/${encodeURIComponent(appId)}/schedules/${encodeURIComponent(scheduleId)}`,
+    `/apps/${encodeURIComponent(appId)}/schedules/${encodeURIComponent(
+      scheduleId
+    )}`,
     { method: "DELETE" }
   );
   return readApiJson<ScheduleDeleteResponse>(response, "Schedule delete");
@@ -598,10 +628,15 @@ export async function listScheduleExecutionLogs(
   const response = await apiFetch(
     baseUrl,
     token,
-    `/v1/schedules/${encodeURIComponent(scheduleId)}/execution-logs${buildLimitQuery(options?.limit)}`,
+    `/v1/schedules/${encodeURIComponent(
+      scheduleId
+    )}/execution-logs${buildLimitQuery(options?.limit)}`,
     { method: "GET" }
   );
-  const payload = await readApiJson<unknown>(response, "Schedule execution logs");
+  const payload = await readApiJson<unknown>(
+    response,
+    "Schedule execution logs"
+  );
   return { logs: normalizeScheduleExecutionLogs(payload) };
 }
 
@@ -614,10 +649,15 @@ export async function listDeploymentScheduleExecutionLogs(
   const response = await apiFetch(
     baseUrl,
     token,
-    `/v1/deployments/${encodeURIComponent(deploymentId)}/schedule-execution-logs${buildLimitQuery(options?.limit)}`,
+    `/v1/deployments/${encodeURIComponent(
+      deploymentId
+    )}/schedule-execution-logs${buildLimitQuery(options?.limit)}`,
     { method: "GET" }
   );
-  const payload = await readApiJson<unknown>(response, "Deployment schedule execution logs");
+  const payload = await readApiJson<unknown>(
+    response,
+    "Deployment schedule execution logs"
+  );
   return { logs: normalizeScheduleExecutionLogs(payload) };
 }
 
@@ -644,10 +684,15 @@ export async function getAppExecutionTimeline(
   const response = await apiFetch(
     baseUrl,
     token,
-    `/v1/apps/${encodeURIComponent(appId)}/execution-timeline${buildLimitQuery(options?.limit)}`,
+    `/v1/apps/${encodeURIComponent(appId)}/execution-timeline${buildLimitQuery(
+      options?.limit
+    )}`,
     { method: "GET" }
   );
-  return readApiJson<AppExecutionTimelineResponse>(response, "App execution timeline");
+  return readApiJson<AppExecutionTimelineResponse>(
+    response,
+    "App execution timeline"
+  );
 }
 
 export async function createAgentFromPrompt(
@@ -730,7 +775,9 @@ export async function getOpenPondAccountBalance(
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`Account balance lookup failed: ${response.status} ${text}`);
+    throw new Error(
+      `Account balance lookup failed: ${response.status} ${text}`
+    );
   }
   return (await response.json()) as OpenPondAccountBalanceResponse;
 }
@@ -748,7 +795,9 @@ export async function checkOpenPondApiHealth(
       headers: { Accept: "application/json" },
     });
     const latencyMs = Date.now() - started;
-    const payload = (await response.json().catch(() => ({}))) as Partial<OpenPondApiHealthResponse>;
+    const payload = (await response
+      .json()
+      .catch(() => ({}))) as Partial<OpenPondApiHealthResponse>;
     let authenticated: boolean | null = null;
     let account: OpenPondAccount | null = null;
 
@@ -771,7 +820,9 @@ export async function checkOpenPondApiHealth(
       service: typeof payload.service === "string" ? payload.service : null,
       checkedAt,
       account,
-      ...(response.ok ? {} : { error: response.statusText || `HTTP ${response.status}` }),
+      ...(response.ok
+        ? {}
+        : { error: response.statusText || `HTTP ${response.status}` }),
     };
   } catch (error) {
     return {
@@ -937,9 +988,14 @@ export async function submitBacktestDetail(
   query: Record<string, string>
 ): Promise<unknown> {
   const qs = new URLSearchParams(query).toString();
-  const response = await apiFetch(baseUrl, token, `/apps/backtests/detail?${qs}`, {
-    method: "GET",
-  });
+  const response = await apiFetch(
+    baseUrl,
+    token,
+    `/apps/backtests/detail?${qs}`,
+    {
+      method: "GET",
+    }
+  );
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new Error(`Backtest detail failed: ${response.status} ${text}`);

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { validateSandboxTemplateYaml } from "../src/sandbox-template";
+import { validateSandboxTemplateYaml } from "../src/sandbox-template/manifest";
 
 const baseManifest = `
 schemaVersion: 1
@@ -52,12 +52,9 @@ schedules:
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.manifest.schedules.map((schedule) => schedule.name)).toEqual([
-        "start-daily",
-        "report-daily",
-        "web-once",
-        "raw-command",
-      ]);
+      expect(
+        result.manifest.schedules.map((schedule) => schedule.name)
+      ).toEqual(["start-daily", "report-daily", "web-once", "raw-command"]);
     }
   });
 
@@ -74,7 +71,7 @@ schedules:
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.diagnostics[0]?.message).toContain(
-        "schedule service target does not exist: api",
+        "schedule service target does not exist: api"
       );
     }
   });

@@ -1,4 +1,4 @@
-import { listHistory } from "./history";
+import { listHistory } from "./store";
 
 export async function buildHistorySummary(rootDir: string): Promise<string[]> {
   const records = await listHistory(rootDir, 50);
@@ -14,10 +14,7 @@ export async function buildHistorySummary(rootDir: string): Promise<string[]> {
   ]);
 
   const widths = headers.map((header, index) =>
-    Math.max(
-      header.length,
-      ...rows.map((row) => (row[index] ?? "").length)
-    )
+    Math.max(header.length, ...rows.map((row) => (row[index] ?? "").length))
   );
   const pad = (value: string, length: number) => value.padEnd(length, " ");
   const line = (cols: string[]) =>

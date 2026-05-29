@@ -7,7 +7,7 @@ import {
   sandboxTemplatePreviewPort,
   sandboxTemplateResources,
   validateSandboxTemplateManifest,
-} from "../src/sandbox-template";
+} from "../src/sandbox-template/manifest";
 
 describe("sandbox template helpers", () => {
   test("build common resource, volume, file input, and preview port fragments", () => {
@@ -81,7 +81,7 @@ describe("sandbox template helpers", () => {
   test("uses the validator for invalid helper fragments", () => {
     expect(() => sandboxTemplatePreviewPort(2999)).toThrow();
     expect(() =>
-      sandboxTemplateFileInput({ targetPath: "../outside" }),
+      sandboxTemplateFileInput({ targetPath: "../outside" })
     ).toThrow();
   });
 });

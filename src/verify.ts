@@ -8,7 +8,10 @@ type VerificationResult = {
   reasons?: string[];
 };
 
-async function runCommand(cmd: string[], cwd: string): Promise<VerificationResult> {
+async function runCommand(
+  cmd: string[],
+  cwd: string
+): Promise<VerificationResult> {
   const proc = Bun.spawn(cmd, { cwd });
   const stdout = await new Response(proc.stdout).text();
   const stderr = await new Response(proc.stderr).text();
@@ -21,7 +24,9 @@ async function runCommand(cmd: string[], cwd: string): Promise<VerificationResul
   };
 }
 
-export async function verifyWorkspace(rootDir: string): Promise<VerificationResult[]> {
+export async function verifyWorkspace(
+  rootDir: string
+): Promise<VerificationResult[]> {
   const results: VerificationResult[] = [];
   results.push(await runCommand(["bunx", "opentool", "validate"], rootDir));
   results.push(await runCommand(["bunx", "opentool", "build"], rootDir));
@@ -92,7 +97,9 @@ export async function verifyPromptRules(
     if (hasRegex(content, /TODO[:\s]/)) {
       errors.push("tool contains TODO placeholder");
     }
-    if (hasRegex(content, /import\s+\{[^}]*\bstore\b[^}]*\}\s+from\s+["']zod["']/)) {
+    if (
+      hasRegex(content, /import\s+\{[^}]*\bstore\b[^}]*\}\s+from\s+["']zod["']/)
+    ) {
       errors.push("store must be imported from opentool/store (not zod)");
     }
   }
@@ -133,7 +140,10 @@ export async function verifyPromptRules(
       file !== "package.json"
     ) {
       errors.push(`unsupported file edited: ${file}`);
-    } else if ((file.startsWith("src/") || file.startsWith("lib/")) && !allowExtras) {
+    } else if (
+      (file.startsWith("src/") || file.startsWith("lib/")) &&
+      !allowExtras
+    ) {
       errors.push(`${file} edited without prompt request`);
     }
   }
@@ -141,13 +151,13 @@ export async function verifyPromptRules(
   const packagePath = path.join(rootDir, "package.json");
   try {
     const pkg = await fs.readFile(packagePath, "utf-8");
-    if (!pkg.includes("\"opentool\"")) {
+    if (!pkg.includes('"opentool"')) {
       errors.push("package.json missing opentool dependency");
     }
-    if (!pkg.includes("\"zod\"")) {
+    if (!pkg.includes('"zod"')) {
       errors.push("package.json missing zod dependency");
     }
-    if (!pkg.includes("\"validate\"")) {
+    if (!pkg.includes('"validate"')) {
       errors.push("package.json missing validate script");
     }
   } catch {

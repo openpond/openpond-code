@@ -136,8 +136,17 @@ function requireApiKey(value: string | undefined | null): string {
   return trimmed;
 }
 
-function handleEquals(left: string, right: string): boolean {
-  return left.trim().toLowerCase() === right.trim().toLowerCase();
+function handleEquals(
+  left: string | undefined | null,
+  right: string | undefined | null
+): boolean {
+  const normalizedLeft = normalizeHandle(left);
+  const normalizedRight = normalizeHandle(right);
+  return Boolean(
+    normalizedLeft &&
+      normalizedRight &&
+      normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+  );
 }
 
 function findAccountIndex(
@@ -153,9 +162,12 @@ function findAccountIndex(
   });
 }
 
-function selectorFromAccount(account: LocalAccountConfig): ActiveProfileSelector {
+function selectorFromAccount(
+  account: LocalAccountConfig
+): ActiveProfileSelector {
+  const handle = normalizeHandle(account.handle) ?? DEFAULT_ACCOUNT_HANDLE;
   const baseUrl = normalizeBaseUrl(account.baseUrl);
-  return baseUrl ? { handle: account.handle, baseUrl } : { handle: account.handle };
+  return baseUrl ? { handle, baseUrl } : { handle };
 }
 
 function sanitizeActiveProfile(value: unknown): ActiveProfileSelector | null {
@@ -194,7 +206,9 @@ function findAccountIndexForSelector(
     return findAccountIndex(accounts, selector.handle, normalizedBaseUrl);
   }
 
-  const noBaseIdx = accounts.findIndex((account) => accountMatchesSelector(account, selector));
+  const noBaseIdx = accounts.findIndex((account) =>
+    accountMatchesSelector(account, selector)
+  );
   if (noBaseIdx !== -1) return noBaseIdx;
 
   const matches = accounts
@@ -218,7 +232,10 @@ function sanitizeSession(value: unknown): LocalSessionConfig | undefined {
   if (typeof input.appId === "string" || input.appId === null) {
     out.appId = input.appId;
   }
-  if (typeof input.conversationId === "string" || input.conversationId === null) {
+  if (
+    typeof input.conversationId === "string" ||
+    input.conversationId === null
+  ) {
     out.conversationId = input.conversationId;
   }
   return Object.keys(out).length > 0 ? out : undefined;
@@ -236,14 +253,18 @@ function sanitizeAccount(value: unknown): LocalAccountConfig | null {
   if (typeof input.apiKey === "string") out.apiKey = input.apiKey;
   if (typeof input.baseUrl === "string") out.baseUrl = input.baseUrl;
   if (typeof input.apiBaseUrl === "string") out.apiBaseUrl = input.apiBaseUrl;
-  if (typeof input.chatApiBaseUrl === "string") out.chatApiBaseUrl = input.chatApiBaseUrl;
-  if (typeof input.environment === "string") out.environment = input.environment;
+  if (typeof input.chatApiBaseUrl === "string")
+    out.chatApiBaseUrl = input.chatApiBaseUrl;
+  if (typeof input.environment === "string")
+    out.environment = input.environment;
   const session = sanitizeSession(input.session);
   if (session) out.session = session;
   return out;
 }
 
-function extractLegacySession(raw: LocalConfig): LocalSessionConfig | undefined {
+function extractLegacySession(
+  raw: LocalConfig
+): LocalSessionConfig | undefined {
   const session: LocalSessionConfig = {};
   if (typeof raw.token === "string") session.token = raw.token;
   if (typeof raw.appId === "string" || raw.appId === null) {
@@ -255,12 +276,16 @@ function extractLegacySession(raw: LocalConfig): LocalSessionConfig | undefined 
   return Object.keys(session).length > 0 ? session : undefined;
 }
 
-function extractLegacyAccount(raw: LocalConfig, handle: string): LocalAccountConfig {
+function extractLegacyAccount(
+  raw: LocalConfig,
+  handle: string
+): LocalAccountConfig {
   const out: LocalAccountConfig = { handle };
   if (typeof raw.apiKey === "string") out.apiKey = raw.apiKey;
   if (typeof raw.baseUrl === "string") out.baseUrl = raw.baseUrl;
   if (typeof raw.apiBaseUrl === "string") out.apiBaseUrl = raw.apiBaseUrl;
-  if (typeof raw.chatApiBaseUrl === "string") out.chatApiBaseUrl = raw.chatApiBaseUrl;
+  if (typeof raw.chatApiBaseUrl === "string")
+    out.chatApiBaseUrl = raw.chatApiBaseUrl;
   const session = extractLegacySession(raw);
   if (session) out.session = session;
   return out;
@@ -269,7 +294,8 @@ function extractLegacyAccount(raw: LocalConfig, handle: string): LocalAccountCon
 function normalizeGlobalConfig(raw: LocalConfig): LocalConfig {
   const normalized: LocalConfig = {};
 
-  if (typeof raw.lspEnabled === "boolean") normalized.lspEnabled = raw.lspEnabled;
+  if (typeof raw.lspEnabled === "boolean")
+    normalized.lspEnabled = raw.lspEnabled;
   if (raw.executionMode === "local" || raw.executionMode === "hosted") {
     normalized.executionMode = raw.executionMode;
   }
@@ -282,18 +308,22 @@ function normalizeGlobalConfig(raw: LocalConfig): LocalConfig {
   for (const candidate of sourceAccounts) {
     const account = sanitizeAccount(candidate);
     if (!account) continue;
-    if (findAccountIndex(accounts, account.handle, account.baseUrl) !== -1) continue;
+    if (findAccountIndex(accounts, account.handle, account.baseUrl) !== -1)
+      continue;
     accounts.push(account);
   }
 
   if (accounts.length === 0) {
     const legacyHandle =
-      sanitizeActiveProfile(raw.activeProfile)?.handle || DEFAULT_ACCOUNT_HANDLE;
+      sanitizeActiveProfile(raw.activeProfile)?.handle ||
+      DEFAULT_ACCOUNT_HANDLE;
     accounts.push(extractLegacyAccount(raw, legacyHandle));
   }
 
   const requested = sanitizeActiveProfile(raw.activeProfile);
-  const activeIdx = requested ? findAccountIndexForSelector(accounts, requested) : -1;
+  const activeIdx = requested
+    ? findAccountIndexForSelector(accounts, requested)
+    : -1;
   const activeAccount = accounts[activeIdx === -1 ? 0 : activeIdx]!;
 
   normalized.accounts = accounts;
@@ -307,10 +337,14 @@ function resolveRequestedProfile(
   explicitBaseUrl?: string | null
 ): ActiveProfileSelector {
   const accounts = global.accounts ?? [];
-  const requestedBaseUrl = normalizeBaseUrl(explicitBaseUrl ?? process.env.OPENPOND_BASE_URL);
+  const requestedBaseUrl = normalizeBaseUrl(
+    explicitBaseUrl ?? process.env.OPENPOND_BASE_URL
+  );
   const explicit = normalizeHandle(explicitAccount);
   if (explicit) {
-    return requestedBaseUrl ? { handle: explicit, baseUrl: requestedBaseUrl } : { handle: explicit };
+    return requestedBaseUrl
+      ? { handle: explicit, baseUrl: requestedBaseUrl }
+      : { handle: explicit };
   }
 
   const envAccount = normalizeHandle(process.env.OPENPOND_ACCOUNT);
@@ -327,7 +361,9 @@ function resolveRequestedProfile(
       : activeProfile;
   }
 
-  return accounts[0] ? selectorFromAccount(accounts[0]) : { handle: DEFAULT_ACCOUNT_HANDLE };
+  return accounts[0]
+    ? selectorFromAccount(accounts[0])
+    : { handle: DEFAULT_ACCOUNT_HANDLE };
 }
 
 function ensureAccount(
@@ -342,9 +378,13 @@ function ensureAccount(
       return accounts[idx]!;
     }
   } else {
-    const matches = accounts.filter((account) => handleEquals(account.handle, handle));
+    const matches = accounts.filter((account) =>
+      handleEquals(account.handle, handle)
+    );
     if (matches.length > 1) {
-      throw new Error(`multiple profiles found for ${handle}; pass --base-url to select one`);
+      throw new Error(
+        `multiple profiles found for ${handle}; pass --base-url to select one`
+      );
     }
     if (matches.length === 1) {
       return matches[0]!;
@@ -370,7 +410,8 @@ function applyScopedKey(
   value: unknown,
   options: { undefinedDeletes: boolean }
 ): void {
-  const shouldDelete = value === null || (value === undefined && options.undefinedDeletes);
+  const shouldDelete =
+    value === null || (value === undefined && options.undefinedDeletes);
   switch (key) {
     case "apiKey": {
       if (shouldDelete) {
@@ -439,16 +480,23 @@ function applyAccountPatch(
   if (!hasScopedPatch) return false;
 
   const accounts = global.accounts ?? [];
-  const selector = sanitizeActiveProfile(source.activeProfile) ?? resolveRequestedProfile(global);
+  const selector =
+    sanitizeActiveProfile(source.activeProfile) ??
+    resolveRequestedProfile(global);
   const requestedBaseUrl = normalizeBaseUrl(
     hasOwn(source, "baseUrl")
-      ? (source.baseUrl ?? null)
-      : (selector.baseUrl ?? process.env.OPENPOND_BASE_URL)
+      ? source.baseUrl ?? null
+      : selector.baseUrl ?? process.env.OPENPOND_BASE_URL
   );
   const account = ensureAccount(accounts, selector.handle, requestedBaseUrl);
   for (const key of ACCOUNT_SCOPED_KEYS) {
     if (!hasOwn(source, key)) continue;
-    applyScopedKey(account, key, (source as Record<string, unknown>)[key], options);
+    applyScopedKey(
+      account,
+      key,
+      (source as Record<string, unknown>)[key],
+      options
+    );
   }
   global.accounts = accounts;
   global.activeProfile = selectorFromAccount(account);
@@ -481,7 +529,10 @@ function applyTopLevelPatch(global: LocalConfig, source: LocalConfig): void {
     const selector = sanitizeActiveProfile(source.activeProfile);
     if (selector) {
       const idx = findAccountIndexForSelector(global.accounts ?? [], selector);
-      global.activeProfile = idx === -1 ? selector : selectorFromAccount((global.accounts ?? [])[idx]!);
+      global.activeProfile =
+        idx === -1
+          ? selector
+          : selectorFromAccount((global.accounts ?? [])[idx]!);
     } else if (source.activeProfile === null) {
       delete global.activeProfile;
     }
@@ -500,11 +551,19 @@ export async function loadGlobalConfig(): Promise<LocalConfig> {
   return normalizeGlobalConfig(raw);
 }
 
-export async function loadConfig(options: LoadConfigOptions = {}): Promise<LocalConfig> {
+export async function loadConfig(
+  options: LoadConfigOptions = {}
+): Promise<LocalConfig> {
   const global = await loadGlobalConfig();
   const accounts = global.accounts ?? [];
-  const requested = resolveRequestedProfile(global, options.account, options.baseUrl);
-  const idx = findAccountIndexForSelector(accounts, requested, { requireUnambiguous: true });
+  const requested = resolveRequestedProfile(
+    global,
+    options.account,
+    options.baseUrl
+  );
+  const idx = findAccountIndexForSelector(accounts, requested, {
+    requireUnambiguous: true,
+  });
   const account = idx === -1 ? null : accounts[idx]!;
   const session = account?.session;
   return {
@@ -523,18 +582,24 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Local
 export async function listConfiguredProfiles(): Promise<ConfiguredProfile[]> {
   const global = await loadGlobalConfig();
   const activeProfile = sanitizeActiveProfile(global.activeProfile);
-  return (global.accounts ?? []).map((account) => ({
-    handle: account.handle,
-    baseUrl: normalizeBaseUrl(account.baseUrl),
-    apiBaseUrl: normalizeBaseUrl(account.apiBaseUrl),
-    chatApiBaseUrl: normalizeBaseUrl(account.chatApiBaseUrl),
-    environment: account.environment?.trim() || null,
-    isActive: Boolean(activeProfile && accountMatchesSelector(account, activeProfile)),
-    hasApiKey: Boolean(account.apiKey?.trim()),
-    hasSessionToken: Boolean(account.session?.token?.trim()),
-    sessionAppId: account.session?.appId ?? null,
-    sessionConversationId: account.session?.conversationId ?? null,
-  }));
+  return (global.accounts ?? []).map((account) => {
+    const handle = normalizeHandle(account.handle) ?? DEFAULT_ACCOUNT_HANDLE;
+    return {
+      handle,
+      baseUrl: normalizeBaseUrl(account.baseUrl),
+      apiBaseUrl: normalizeBaseUrl(account.apiBaseUrl),
+      chatApiBaseUrl: normalizeBaseUrl(account.chatApiBaseUrl),
+      environment: account.environment?.trim() || null,
+      isActive: Boolean(
+        activeProfile &&
+          accountMatchesSelector({ ...account, handle }, activeProfile)
+      ),
+      hasApiKey: Boolean(account.apiKey?.trim()),
+      hasSessionToken: Boolean(account.session?.token?.trim()),
+      sessionAppId: account.session?.appId ?? null,
+      sessionConversationId: account.session?.conversationId ?? null,
+    };
+  });
 }
 
 export async function setActiveProfile(
@@ -547,7 +612,9 @@ export async function setActiveProfile(
   const accounts = global.accounts ?? [];
   const idx = findAccountIndexForSelector(
     accounts,
-    requestedBaseUrl ? { handle: requestedHandle, baseUrl: requestedBaseUrl } : { handle: requestedHandle },
+    requestedBaseUrl
+      ? { handle: requestedHandle, baseUrl: requestedBaseUrl }
+      : { handle: requestedHandle },
     { requireUnambiguous: true }
   );
   if (idx === -1) {
@@ -589,7 +656,10 @@ export async function saveProfileApiKey(
   }
   if (input.environment === null) {
     delete account.environment;
-  } else if (typeof input.environment === "string" && input.environment.trim()) {
+  } else if (
+    typeof input.environment === "string" &&
+    input.environment.trim()
+  ) {
     account.environment = input.environment.trim();
   }
 

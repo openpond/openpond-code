@@ -138,7 +138,11 @@ function requireToken(value: string): string {
   return trimmed;
 }
 
-function hostedHeaders(token: string, accept: string, requestId?: string): Headers {
+function hostedHeaders(
+  token: string,
+  accept: string,
+  requestId?: string
+): Headers {
   const headers = new Headers();
   headers.set("Authorization", `Bearer ${requireToken(token)}`);
   headers.set("Content-Type", "application/json");
@@ -154,7 +158,8 @@ async function readError(response: Response): Promise<string> {
   try {
     const payload = JSON.parse(text) as { error?: unknown; message?: unknown };
     const error = typeof payload.error === "string" ? payload.error : null;
-    const message = typeof payload.message === "string" ? payload.message : null;
+    const message =
+      typeof payload.message === "string" ? payload.message : null;
     return [error, message].filter(Boolean).join(": ") || text;
   } catch {
     return text;
@@ -192,7 +197,11 @@ export async function listHostedModels(
     signal: options.signal,
   });
   if (!response.ok) {
-    throw new Error(`Hosted model list failed: ${response.status} ${await readError(response)}`);
+    throw new Error(
+      `Hosted model list failed: ${response.status} ${await readError(
+        response
+      )}`
+    );
   }
   return (await response.json()) as HostedModelsResponse;
 }
@@ -203,12 +212,18 @@ export async function sendHostedChatTurn(
   const apiBaseUrl = normalizeApiBaseUrl(options.apiBaseUrl);
   const response = await fetch(`${apiBaseUrl}/v1/chat/completions`, {
     method: "POST",
-    headers: hostedHeaders(options.token, "application/json", options.requestId),
+    headers: hostedHeaders(
+      options.token,
+      "application/json",
+      options.requestId
+    ),
     body: JSON.stringify(buildHostedChatBody(options, false)),
     signal: options.signal,
   });
   if (!response.ok) {
-    throw new Error(`Hosted chat failed: ${response.status} ${await readError(response)}`);
+    throw new Error(
+      `Hosted chat failed: ${response.status} ${await readError(response)}`
+    );
   }
   return (await response.json()) as HostedChatCompletion;
 }
@@ -237,7 +252,9 @@ async function* parseOpenAISSE(
   const decoder = new TextDecoder();
   let buffer = "";
   const readAbortError = () =>
-    signal?.reason instanceof Error ? signal.reason : new Error("hosted_chat_aborted");
+    signal?.reason instanceof Error
+      ? signal.reason
+      : new Error("hosted_chat_aborted");
 
   try {
     while (true) {
@@ -271,12 +288,20 @@ export async function* streamHostedChatTurn(
   const apiBaseUrl = normalizeApiBaseUrl(options.apiBaseUrl);
   const response = await fetch(`${apiBaseUrl}/v1/chat/completions`, {
     method: "POST",
-    headers: hostedHeaders(options.token, "text/event-stream", options.requestId),
+    headers: hostedHeaders(
+      options.token,
+      "text/event-stream",
+      options.requestId
+    ),
     body: JSON.stringify(buildHostedChatBody(options, true)),
     signal: options.signal,
   });
   if (!response.ok || !response.body) {
-    throw new Error(`Hosted chat stream failed: ${response.status} ${await readError(response)}`);
+    throw new Error(
+      `Hosted chat stream failed: ${response.status} ${await readError(
+        response
+      )}`
+    );
   }
 
   for await (const raw of parseOpenAISSE(response.body, options.signal)) {

@@ -12,10 +12,10 @@
   },
   "scripts": {
     "dev": "bun run src/index.tsx",
-    "cli": "bun run src/cli-package.ts",
-    "cli:package": "bun run src/cli-package.ts",
-    "build:cli": "bun build ./src/cli-package.ts --outfile=dist/cli.js --target=node --banner:js='#!/usr/bin/env node'",
-    "build:package": "bun build src/index.ts src/sandbox-template.ts --outdir dist --target node",
+    "cli": "bun run src/cli/main.ts",
+    "cli:package": "bun run src/cli/main.ts",
+    "build:cli": "bun build ./src/cli/main.ts --outfile=dist/cli.js --target=node --banner:js='#!/usr/bin/env node'",
+    "build:package": "bun build src/index.ts src/sandbox-template/manifest.ts --outdir dist --target node",
     "build:types": "tsc --project tsconfig.package.json",
     "lint": "npm run typecheck",
     "typecheck": "npm run build:types",
@@ -53,8 +53,8 @@
       "types": "./dist/index.d.ts"
     },
     "./sandbox-template": {
-      "import": "./dist/sandbox-template.js",
-      "types": "./dist/sandbox-template.d.ts"
+      "import": "./dist/sandbox-template/manifest.js",
+      "types": "./dist/sandbox-template/manifest.d.ts"
     }
   },
   "dependencies": {

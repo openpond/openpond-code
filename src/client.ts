@@ -290,280 +290,76 @@ export type {
 } from "./config";
 export { consumeStream, formatStreamItem, normalizeDataFrames } from "./stream";
 
-export type OpenPondClientOptions = {
-  apiKey?: string;
-  baseUrl?: string;
-  apiUrl?: string;
-  chatApiUrl?: string;
-  toolUrl?: string;
-  cacheTtlMs?: number;
-  useCache?: boolean;
-};
-
-export type ToolSummary = {
-  name: string;
-  description?: string;
-  raw: unknown;
-};
-
-export type ToolListResult = {
-  app: AppListItem;
-  deploymentId: string | null;
-  tools: ToolSummary[];
-};
-
-export type DeploymentWatchResult = {
-  deploymentId: string;
-  status: string | "timeout" | null;
-  logs: DeploymentLogEntry[];
-};
-
-export type AgentCreateStreamCallbacks = StreamCallbacks & {
-  onAppId?: (appId: string) => void;
-  onDeploymentId?: (deploymentId: string) => void;
-};
-
-export type AgentCreateStreamResult = {
-  conversationId?: string;
-  appId?: string;
-  deploymentId?: string;
-};
-
-export type OpenPondClient = {
-  baseUrl: string;
-  apiUrl: string;
-  chatApiUrl: string;
-  toolUrl: string;
-  apiKey: string;
-  account: {
-    get: () => Promise<OpenPondAccountResponse>;
-    balance: () => Promise<OpenPondAccountBalanceResponse>;
-    health: () => Promise<OpenPondApiHealth>;
-  };
-  chat: {
-    models: () => Promise<import("./hosted-chat").HostedModelsResponse>;
-    send: (
-      input: Omit<import("./hosted-chat").HostedChatRequestOptions, "apiBaseUrl" | "token">
-    ) => Promise<import("./hosted-chat").HostedChatCompletion>;
-    stream: (
-      input: Omit<import("./hosted-chat").HostedChatRequestOptions, "apiBaseUrl" | "token">
-    ) => AsyncGenerator<import("./hosted-chat").HostedChatStreamDelta, void, unknown>;
-  };
-  tool: {
-    list: (target: string, options?: ToolListOptions) => Promise<ToolListResult>;
-    run: (
-      target: string,
-      toolName: string,
-      options?: ToolRunOptions
-    ) => Promise<ToolExecuteResponse>;
-  };
-  deploy: {
-    watch: (
-      target: string,
-      options?: DeployWatchOptions
-    ) => Promise<DeploymentWatchResult>;
-  };
-  template: {
-    status: (
-      target: string,
-      options?: TemplateTargetOptions
-    ) => Promise<TemplateStatusResponse>;
-    branches: (
-      target: string,
-      options?: TemplateTargetOptions
-    ) => Promise<TemplateBranchesResponse>;
-    update: (
-      target: string,
-      options?: TemplateUpdateOptions
-    ) => Promise<TemplateDeployLatestResponse>;
-  };
-  opentool: {
-    recipesList: (input?: OpenToolRecipeListRequest) => Promise<OpenToolRecipeListResponse>;
-    recipesSearch: (input: OpenToolRecipeSearchRequest) => Promise<OpenToolRecipeSearchResponse>;
-    recipeGet: (input: OpenToolRecipeGetRequest) => Promise<OpenToolRecipe>;
-    rulesGet: (input: OpenToolRulesGetRequest) => Promise<OpenToolRulesGetResponse>;
-  };
-  apps: {
-    list: (options?: AppsListOptions) => Promise<AppListItem[]>;
-    tools: (options?: AppsToolsOptions) => Promise<unknown[]>;
-    performance: (options?: AppsPerformanceOptions) => Promise<unknown>;
-    summary: (input: AppSummaryOptions) => Promise<AppRuntimeSummary>;
-    schedules: (input: AppSchedulesOptions) => Promise<AppSchedulesResponse>;
-    schedulesStart: (input: AppSchedulesStartOptions) => Promise<ScheduleToggleResult>;
-    schedulesStop: (input: AppSchedulesStopOptions) => Promise<ScheduleToggleResult>;
-    schedulesStopCurrent: () => Promise<ScheduleToggleResult>;
-    scheduleRunNow: (input: ScheduleRunNowOptions) => Promise<ScheduleRunNowResponse>;
-    scheduleDelete: (input: ScheduleDeleteOptions) => Promise<ScheduleDeleteResponse>;
-    scheduleExecutionLogs: (
-      input: ScheduleExecutionLogsOptions
-    ) => Promise<ScheduleExecutionLogsResponse>;
-    scheduleExecutionLog: (input: ScheduleExecutionLogOptions) => Promise<ScheduleExecutionLog>;
-    deploymentScheduleExecutionLogs: (
-      input: DeploymentScheduleExecutionLogsOptions
-    ) => Promise<ScheduleExecutionLogsResponse>;
-    executionTimeline: (input: AppExecutionTimelineOptions) => Promise<AppExecutionTimelineResponse>;
-    assistantRun: (input: AppsAssistantRunOptions) => Promise<AssistantRunResponse>;
-    agentCreate: (
-      input: AgentCreateRequest & { refreshCache?: boolean },
-      callbacks?: AgentCreateStreamCallbacks
-    ) => Promise<AgentCreateStreamResult>;
-    toolsExecute: (input: ExecuteUserToolOptions) => Promise<ToolExecuteResponse>;
-    deploy: (input: AppDeployOptions) => Promise<{ deploymentId: string }>;
-    startApp: (input: AppStartOptions) => Promise<StartAppLifecycleResponse>;
-    promotePreview: (
-      input: AppPromotePreviewOptions
-    ) => Promise<PromotePreviewToProductionResponse>;
-    envGet: (input: AppEnvironmentGetOptions) => Promise<AppEnvironmentGetResponse>;
-    envSet: (input: AppEnvironmentSetOptions) => Promise<AppEnvironmentUpdateResponse>;
-    positionsTx: (input?: PositionsTxOptions) => Promise<unknown>;
-  };
-  repo: {
-    create: (
-      input: CreateRepoRequest & { refreshCache?: boolean }
-    ) => Promise<CreateRepoResponse>;
-  };
-  cache: {
-    refresh: () => Promise<void>;
-  };
-};
-
-export type ToolListOptions = {
-  branch?: string;
-  forceRefresh?: boolean;
-  deploymentId?: string;
-};
-
-export type ToolRunOptions = {
-  branch?: string;
-  deploymentId?: string;
-  method?: ToolExecuteRequest["method"];
-  body?: unknown;
-  headers?: Record<string, string>;
-  forceRefresh?: boolean;
-};
-
-export type DeployWatchOptions = {
-  branch?: string;
-  deploymentId?: string;
-  intervalMs?: number;
-  timeoutMs?: number;
-  forceRefresh?: boolean;
-  onLog?: (log: DeploymentLogEntry) => void;
-  onStatus?: (status: string | null) => void;
-};
-
-export type TemplateTargetOptions = {
-  forceRefresh?: boolean;
-};
-
-export type TemplateUpdateOptions = {
-  environment?: TemplateDeployLatestRequest["environment"];
-  forceRefresh?: boolean;
-};
-
-export type AppsListOptions = {
-  handle?: string;
-  forceRefresh?: boolean;
-};
-
-export type AppsToolsOptions = {
-  forceRefresh?: boolean;
-};
-
-export type AppsPerformanceOptions = {
-  appId?: string;
-};
-
-export type AppSummaryOptions = {
-  appId: string;
-};
-
-export type AppSchedulesOptions = {
-  appId: string;
-};
-
-export type AppSchedulesStartOptions = {
-  appId: string;
-} & ScheduleToggleRequest;
-
-export type AppSchedulesStopOptions = {
-  appId: string;
-};
-
-export type ScheduleRunNowOptions = ScheduleRunNowRequest;
-
-export type ScheduleDeleteOptions = {
-  appId: string;
-  scheduleId: string;
-};
-
-export type ScheduleExecutionLogsOptions = {
-  scheduleId: string;
-  limit?: number;
-};
-
-export type ScheduleExecutionLogOptions = {
-  runId: string;
-};
-
-export type DeploymentScheduleExecutionLogsOptions = {
-  deploymentId: string;
-  limit?: number;
-};
-
-export type AppExecutionTimelineOptions = {
-  appId: string;
-  limit?: number;
-};
-
-export type AppsAssistantRunOptions = {
-  appId: string;
-  mode: AssistantMode;
-  prompt: string;
-};
-
-export type ExecuteUserToolOptions = {
-  appId: string;
-  deploymentId: string;
-  toolName: string;
-  scheduleId?: string;
-  method?: ToolExecuteRequest["method"];
-  body?: unknown;
-  headers?: Record<string, string>;
-  notifyEmail?: boolean;
-};
-
-export type AppEnvironmentSetOptions = {
-  appId: string;
-  envVars: Record<string, string>;
-};
-
-export type AppEnvironmentGetOptions = {
-  appId: string;
-};
-
-export type AppDeployOptions = {
-  appId: string;
-  environment?: "preview" | "production";
-  commitSha?: string;
-  branch?: string;
-};
-
-export type AppPromotePreviewOptions = {
-  appId: string;
-} & PromotePreviewToProductionRequest;
-
-export type AppStartOptions = {
-  appId: string;
-} & StartAppLifecycleRequest;
-
-export type PositionsTxOptions = {
-  method?: "GET" | "POST";
-  body?: unknown;
-  params?: Record<string, unknown>;
-  query?: Record<string, string>;
-};
-
+export type {
+  OpenPondClientOptions,
+  ToolSummary,
+  ToolListResult,
+  DeploymentWatchResult,
+  AgentCreateStreamCallbacks,
+  AgentCreateStreamResult,
+  OpenPondClient,
+  ToolListOptions,
+  ToolRunOptions,
+  DeployWatchOptions,
+  TemplateTargetOptions,
+  TemplateUpdateOptions,
+  AppsListOptions,
+  AppsToolsOptions,
+  AppsPerformanceOptions,
+  AppSummaryOptions,
+  AppSchedulesOptions,
+  AppSchedulesStartOptions,
+  AppSchedulesStopOptions,
+  ScheduleRunNowOptions,
+  ScheduleDeleteOptions,
+  ScheduleExecutionLogsOptions,
+  ScheduleExecutionLogOptions,
+  DeploymentScheduleExecutionLogsOptions,
+  AppExecutionTimelineOptions,
+  AppsAssistantRunOptions,
+  ExecuteUserToolOptions,
+  AppEnvironmentSetOptions,
+  AppEnvironmentGetOptions,
+  AppDeployOptions,
+  AppPromotePreviewOptions,
+  AppStartOptions,
+  PositionsTxOptions,
+} from "./client-types";
+import type {
+  OpenPondClientOptions,
+  ToolSummary,
+  ToolListResult,
+  DeploymentWatchResult,
+  AgentCreateStreamCallbacks,
+  AgentCreateStreamResult,
+  OpenPondClient,
+  ToolListOptions,
+  ToolRunOptions,
+  DeployWatchOptions,
+  TemplateTargetOptions,
+  TemplateUpdateOptions,
+  AppsListOptions,
+  AppsToolsOptions,
+  AppsPerformanceOptions,
+  AppSummaryOptions,
+  AppSchedulesOptions,
+  AppSchedulesStartOptions,
+  AppSchedulesStopOptions,
+  ScheduleRunNowOptions,
+  ScheduleDeleteOptions,
+  ScheduleExecutionLogsOptions,
+  ScheduleExecutionLogOptions,
+  DeploymentScheduleExecutionLogsOptions,
+  AppExecutionTimelineOptions,
+  AppsAssistantRunOptions,
+  ExecuteUserToolOptions,
+  AppEnvironmentSetOptions,
+  AppEnvironmentGetOptions,
+  AppDeployOptions,
+  AppPromotePreviewOptions,
+  AppStartOptions,
+  PositionsTxOptions,
+} from "./client-types";
 function resolveUrl(value: string): string {
   return value.replace(/\/$/, "");
 }
@@ -580,14 +376,20 @@ function resolveApiUrl(options: OpenPondClientOptions): string {
   return resolveUrl(base.trim());
 }
 
-function resolveChatApiUrl(options: OpenPondClientOptions, apiUrl: string): string {
+function resolveChatApiUrl(
+  options: OpenPondClientOptions,
+  apiUrl: string
+): string {
   return resolveHostedChatApiBaseUrl({
     apiBaseUrl: apiUrl,
     chatApiBaseUrl: options.chatApiUrl,
   });
 }
 
-function resolveToolUrl(options: OpenPondClientOptions, baseUrl: string): string {
+function resolveToolUrl(
+  options: OpenPondClientOptions,
+  baseUrl: string
+): string {
   const envBase = process.env.OPENPOND_TOOL_URL;
   const base = options.toolUrl || envBase || baseUrl;
   return resolveUrl(base.trim());
@@ -618,19 +420,21 @@ function normalizeToolSummary(tool: unknown): ToolSummary {
     return { name: "unknown", raw: tool };
   }
   const record = tool as Record<string, unknown>;
-  const profile = (record.profile || record.function) as Record<string, unknown> | undefined;
+  const profile = (record.profile || record.function) as
+    | Record<string, unknown>
+    | undefined;
   const name =
     typeof record.name === "string"
       ? record.name
       : typeof profile?.name === "string"
-        ? profile.name
-        : "unknown";
+      ? profile.name
+      : "unknown";
   const description =
     typeof record.description === "string"
       ? record.description
       : typeof profile?.description === "string"
-        ? profile.description
-        : undefined;
+      ? profile.description
+      : undefined;
   return { name, description, raw: tool };
 }
 
@@ -669,11 +473,7 @@ async function resolveAppTarget(params: {
     if (app.handle && app.handle !== handle) {
       return false;
     }
-    const candidates = [
-      app.repo,
-      app.gitRepo,
-      app.id,
-    ].map(normalizeRepoName);
+    const candidates = [app.repo, app.gitRepo, app.id].map(normalizeRepoName);
     return candidates.includes(normalizedRepo);
   });
   if (!match) {
@@ -839,11 +639,16 @@ export function createClient(options: OpenPondClientOptions): OpenPondClient {
       health: async () => checkOpenPondApiHealth(apiUrl, apiKey),
     },
     chat: {
-      models: async () => listHostedModels({ apiBaseUrl: chatApiUrl, token: apiKey }),
+      models: async () =>
+        listHostedModels({ apiBaseUrl: chatApiUrl, token: apiKey }),
       send: async (input) =>
         sendHostedChatTurn({ ...input, apiBaseUrl: chatApiUrl, token: apiKey }),
       stream: (input) =>
-        streamHostedChatTurn({ ...input, apiBaseUrl: chatApiUrl, token: apiKey }),
+        streamHostedChatTurn({
+          ...input,
+          apiBaseUrl: chatApiUrl,
+          token: apiKey,
+        }),
     },
     tool: {
       list: async (target, options) => {
@@ -979,8 +784,10 @@ export function createClient(options: OpenPondClientOptions): OpenPondClient {
       },
     },
     opentool: {
-      recipesList: async (input = {}) => listOpenToolRecipes(apiUrl, apiKey, input),
-      recipesSearch: async (input) => searchOpenToolRecipes(apiUrl, apiKey, input),
+      recipesList: async (input = {}) =>
+        listOpenToolRecipes(apiUrl, apiKey, input),
+      recipesSearch: async (input) =>
+        searchOpenToolRecipes(apiUrl, apiKey, input),
       recipeGet: async (input) => getOpenToolRecipe(apiUrl, apiKey, input),
       rulesGet: async (input) => getOpenToolRules(apiUrl, apiKey, input),
     },
@@ -1028,7 +835,12 @@ export function createClient(options: OpenPondClientOptions): OpenPondClient {
         return runScheduleNow(apiUrl, apiKey, input);
       },
       scheduleDelete: async (input) => {
-        return deleteOrArchiveSchedule(apiUrl, apiKey, input.appId, input.scheduleId);
+        return deleteOrArchiveSchedule(
+          apiUrl,
+          apiKey,
+          input.appId,
+          input.scheduleId
+        );
       },
       scheduleExecutionLogs: async (input) => {
         return listScheduleExecutionLogs(apiUrl, apiKey, input.scheduleId, {
@@ -1039,9 +851,14 @@ export function createClient(options: OpenPondClientOptions): OpenPondClient {
         return getScheduleExecutionLog(apiUrl, apiKey, input.runId);
       },
       deploymentScheduleExecutionLogs: async (input) => {
-        return listDeploymentScheduleExecutionLogs(apiUrl, apiKey, input.deploymentId, {
-          limit: input.limit,
-        });
+        return listDeploymentScheduleExecutionLogs(
+          apiUrl,
+          apiKey,
+          input.deploymentId,
+          {
+            limit: input.limit,
+          }
+        );
       },
       executionTimeline: async (input) => {
         return getAppExecutionTimeline(apiUrl, apiKey, input.appId, {
@@ -1108,7 +925,8 @@ export function createClient(options: OpenPondClientOptions): OpenPondClient {
           query = {};
           for (const [key, value] of Object.entries(input.params)) {
             if (value === undefined) continue;
-            query[key] = typeof value === "string" ? value : JSON.stringify(value);
+            query[key] =
+              typeof value === "string" ? value : JSON.stringify(value);
           }
         }
         return submitPositionsTx(apiUrl, apiKey, {

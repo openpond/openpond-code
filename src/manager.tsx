@@ -3,7 +3,12 @@ import { createRoot, useKeyboard, useRenderer } from "@opentui/react";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { attachJsonLineReader, createIpcServer, getSocketPath, writeJsonLine } from "./ipc";
+import {
+  attachJsonLineReader,
+  createIpcServer,
+  getSocketPath,
+  writeJsonLine,
+} from "./ipc";
 
 type TabMode = "chat" | "history";
 
@@ -55,9 +60,13 @@ export function Manager() {
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const inputRef = useRef("");
   const socketPathRef = useRef<string>(getSocketPath());
-  const serverRef = useRef<Awaited<ReturnType<typeof createIpcServer>> | null>(null);
+  const serverRef = useRef<Awaited<ReturnType<typeof createIpcServer>> | null>(
+    null
+  );
   const childrenRef = useRef<Map<string, ChildInfo>>(new Map());
-  const childSocketsRef = useRef<Map<string, import("node:net").Socket>>(new Map());
+  const childSocketsRef = useRef<Map<string, import("node:net").Socket>>(
+    new Map()
+  );
   const copyTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
@@ -101,9 +110,7 @@ export function Manager() {
 
   const updateStreaming = (tabId: string, text: string) => {
     setTabs((prev) =>
-      prev.map((tab) =>
-        tab.id === tabId ? { ...tab, streaming: text } : tab
-      )
+      prev.map((tab) => (tab.id === tabId ? { ...tab, streaming: text } : tab))
     );
   };
 
@@ -117,19 +124,21 @@ export function Manager() {
 
   const updateFooter = (tabId: string, state: TabState["footer"]) => {
     setTabs((prev) =>
-      prev.map((tab) =>
-        tab.id === tabId ? { ...tab, footer: state } : tab
-      )
+      prev.map((tab) => (tab.id === tabId ? { ...tab, footer: state } : tab))
     );
   };
 
   const spawnTab = (mode: TabMode) => {
     const id = `${mode}-${Date.now()}`;
-    const child = spawn("bun", ["run", "src/child.ts", "--mode", mode, "--tab", id], {
-      cwd: process.cwd(),
-      env: { ...process.env, OPENPOND_IPC_SOCKET: socketPathRef.current },
-      stdio: "ignore",
-    });
+    const child = spawn(
+      "bun",
+      ["run", "src/child.ts", "--mode", mode, "--tab", id],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, OPENPOND_IPC_SOCKET: socketPathRef.current },
+        stdio: "ignore",
+      }
+    );
     childrenRef.current.set(id, { proc: child });
     const tab = createTab(id, mode);
     setTabs((prev) => [...prev, tab]);
@@ -142,7 +151,10 @@ export function Manager() {
       const server = await createIpcServer(socketPathRef.current, (socket) => {
         attachJsonLineReader(socket, (message) => {
           if (!message || typeof message !== "object") return;
-          if (message.type === "register" && typeof message.tabId === "string") {
+          if (
+            message.type === "register" &&
+            typeof message.tabId === "string"
+          ) {
             childSocketsRef.current.set(message.tabId, socket);
             if (!activeTabId) {
               setActiveTabId(message.tabId);
@@ -187,7 +199,10 @@ export function Manager() {
       }
       process.exit(0);
     }
-    if ((key.ctrl || key.meta || key.option) && ["1", "2", "3", "4", "5"].includes(key.name)) {
+    if (
+      (key.ctrl || key.meta || key.option) &&
+      ["1", "2", "3", "4", "5"].includes(key.name)
+    ) {
       const index = Number(key.name) - 1;
       const tab = tabs[index];
       if (tab) setActiveTabId(tab.id);
@@ -324,13 +339,22 @@ export function Manager() {
       >
         <box style={{ flexDirection: "column", rowGap: 1, padding: 1 }}>
           {activeTab?.mode === "history" ? (
-            <box style={{ flexDirection: "column", rowGap: 0, padding: 0, width: "100%" }}>
+            <box
+              style={{
+                flexDirection: "column",
+                rowGap: 0,
+                padding: 0,
+                width: "100%",
+              }}
+            >
               <text style={{ fg: "#F8FAFC" }}>
                 {activeTab.statusLine?.length
                   ? `History · ${activeTab.statusLine}`
                   : "History · type: show <id> | refresh"}
               </text>
-              <box style={{ flexDirection: "column", rowGap: 0, width: "100%" }}>
+              <box
+                style={{ flexDirection: "column", rowGap: 0, width: "100%" }}
+              >
                 {activeTab.historyRows.map((line, idx) => (
                   <box
                     key={`${line}-${idx}`}

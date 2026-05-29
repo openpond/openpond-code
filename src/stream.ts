@@ -5,7 +5,11 @@ export type StreamCallbacks = {
   onReasoningDelta?: (delta: string) => void;
   onConversationId?: (id: string) => void;
   onItems?: (items: ResponseItem[]) => void;
-  onUsage?: (usage: { promptTokens?: number; completionTokens?: number; totalTokens?: number }) => void;
+  onUsage?: (usage: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  }) => void;
   shouldStop?: () => boolean;
   onStop?: () => void;
 };
@@ -17,8 +21,8 @@ export function normalizeDataFrames(raw: unknown): {
   const frames = Array.isArray(raw)
     ? raw
     : raw && typeof raw === "object" && Array.isArray((raw as any).data)
-      ? ((raw as any).data as unknown[])
-      : [raw];
+    ? ((raw as any).data as unknown[])
+    : [raw];
   const items: ResponseItem[] = [];
   let conversationId: string | undefined;
 
@@ -70,8 +74,8 @@ function extractUsage(raw: unknown): {
   const frames = Array.isArray(raw)
     ? raw
     : raw && typeof raw === "object" && Array.isArray((raw as any).data)
-      ? ((raw as any).data as unknown[])
-      : [raw];
+    ? ((raw as any).data as unknown[])
+    : [raw];
 
   for (const frame of frames) {
     if (!frame || typeof frame !== "object") continue;
@@ -83,20 +87,20 @@ function extractUsage(raw: unknown): {
       typeof usage.promptTokens === "number"
         ? usage.promptTokens
         : typeof usage.prompt_tokens === "number"
-          ? usage.prompt_tokens
-          : undefined;
+        ? usage.prompt_tokens
+        : undefined;
     const completionTokens =
       typeof usage.completionTokens === "number"
         ? usage.completionTokens
         : typeof usage.completion_tokens === "number"
-          ? usage.completion_tokens
-          : undefined;
+        ? usage.completion_tokens
+        : undefined;
     const totalTokens =
       typeof usage.totalTokens === "number"
         ? usage.totalTokens
         : typeof usage.total_tokens === "number"
-          ? usage.total_tokens
-          : undefined;
+        ? usage.total_tokens
+        : undefined;
     return { promptTokens, completionTokens, totalTokens };
   }
 

@@ -25,7 +25,7 @@ function findProjectRoot(startDir: string): string {
   let dir = startDir;
   for (let i = 0; i < 6; i += 1) {
     const hasPackage = existsSync(path.join(dir, "package.json"));
-    const hasCli = existsSync(path.join(dir, "src", "cli-package.ts"));
+    const hasCli = existsSync(path.join(dir, "src", "cli", "main.ts"));
     if (hasPackage && hasCli) {
       return dir;
     }
@@ -40,16 +40,24 @@ export function getHistoryDir(rootDir: string): string {
   return path.join(os.homedir(), GLOBAL_DIRNAME, HISTORY_DIRNAME);
 }
 
-export async function saveHistory(rootDir: string, record: HistoryEntry): Promise<void> {
+export async function saveHistory(
+  rootDir: string,
+  record: HistoryEntry
+): Promise<void> {
   const dir = getHistoryDir(rootDir);
   await fs.mkdir(dir, { recursive: true });
   const filePath = path.join(dir, `${record.id}.json`);
   await fs.writeFile(filePath, `${JSON.stringify(record, null, 2)}\n`, "utf-8");
 }
 
-export async function listHistory(rootDir: string, limit = 50): Promise<HistoryEntry[]> {
+export async function listHistory(
+  rootDir: string,
+  limit = 50
+): Promise<HistoryEntry[]> {
   const dir = getHistoryDir(rootDir);
-  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+  const entries = await fs
+    .readdir(dir, { withFileTypes: true })
+    .catch(() => []);
   const files = entries
     .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
     .map((entry) => entry.name);

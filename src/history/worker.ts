@@ -1,5 +1,5 @@
-import { buildHistorySummary } from "./history-view";
-import { listHistory, loadHistory } from "./history";
+import { buildHistorySummary } from "./view";
+import { listHistory, loadHistory } from "./store";
 
 export type HistoryWorkerEvents = {
   onLine: (text: string) => void;
@@ -57,7 +57,9 @@ export class HistoryWorker {
         }
         record = fallback;
       }
-      this.events.onLine(`history ${record.id} (${record.messages.length} messages)`);
+      this.events.onLine(
+        `history ${record.id} (${record.messages.length} messages)`
+      );
       record.messages.slice(-20).forEach((msg) => {
         this.events.onLine(`${msg.role}: ${msg.text}`);
       });

@@ -4,7 +4,7 @@ import { argv } from "node:process";
 import { loadConfig } from "./config";
 import { attachJsonLineReader, getSocketPath, writeJsonLine } from "./ipc";
 import { ChatWorker } from "./chat-worker";
-import { HistoryWorker } from "./history-worker";
+import { HistoryWorker } from "./history/worker";
 
 type Mode = "chat" | "history";
 
@@ -38,14 +38,17 @@ async function main() {
     const worker = new HistoryWorker({
       onLine: (text) => writeJsonLine(socket, { type: "line", tabId, text }),
       onRows: (rows) => writeJsonLine(socket, { type: "history", tabId, rows }),
-      onState: (state) => writeJsonLine(socket, { type: "state", tabId, state }),
+      onState: (state) =>
+        writeJsonLine(socket, { type: "state", tabId, state }),
     });
     handler = worker;
   } else {
     const worker = new ChatWorker(baseUrl, config, {
       onLine: (text) => writeJsonLine(socket, { type: "line", tabId, text }),
-      onStream: (text) => writeJsonLine(socket, { type: "stream", tabId, text }),
-      onState: (state) => writeJsonLine(socket, { type: "state", tabId, state }),
+      onStream: (text) =>
+        writeJsonLine(socket, { type: "stream", tabId, text }),
+      onState: (state) =>
+        writeJsonLine(socket, { type: "state", tabId, state }),
     });
     worker.start();
     handler = worker;

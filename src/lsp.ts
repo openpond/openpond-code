@@ -30,7 +30,10 @@ type PendingRequest = {
 
 export class LspClient {
   private readonly rootDir: string;
-  private readonly onDiagnostics?: (uri: string, diagnostics: Diagnostic[]) => void;
+  private readonly onDiagnostics?: (
+    uri: string,
+    diagnostics: Diagnostic[]
+  ) => void;
   private readonly onLog?: (message: string) => void;
   private proc: ReturnType<typeof Bun.spawn> | null = null;
   private writer:
@@ -176,7 +179,10 @@ export class LspClient {
     return response;
   }
 
-  private async sendNotification(method: string, params: unknown): Promise<void> {
+  private async sendNotification(
+    method: string,
+    params: unknown
+  ): Promise<void> {
     await this.sendMessage({ jsonrpc: "2.0", method, params });
   }
 
@@ -252,8 +258,7 @@ export class LspClient {
         const message = JSON.parse(bodyText) as Record<string, unknown>;
         this.handleMessage(message);
       } catch (error) {
-        const msg =
-          error instanceof Error ? error.message : "LSP parse error";
+        const msg = error instanceof Error ? error.message : "LSP parse error";
         this.onLog?.(msg);
       }
     }

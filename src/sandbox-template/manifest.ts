@@ -4,8 +4,10 @@ import { z } from "zod";
 export const SANDBOX_TEMPLATE_PREVIEW_PORT_MIN = 3000;
 export const SANDBOX_TEMPLATE_PREVIEW_PORT_MAX = 9999;
 export const OPENPOND_MANIFEST_FILE_NAME = "openpond.yaml";
-export const SANDBOX_TEMPLATE_BUILD_PLAN_FILE_NAME = "openpond-template-plan.json";
-export const SANDBOX_TEMPLATE_BUILD_PLAN_KIND = "openpond.sandboxTemplate.buildPlan.v1";
+export const SANDBOX_TEMPLATE_BUILD_PLAN_FILE_NAME =
+  "openpond-template-plan.json";
+export const SANDBOX_TEMPLATE_BUILD_PLAN_KIND =
+  "openpond.sandboxTemplate.buildPlan.v1";
 
 const INTEGRATION_PROVIDERS = [
   "google",
@@ -17,7 +19,9 @@ const INTEGRATION_PROVIDERS = [
   "linear",
 ] as const;
 
-const RESERVED_PREVIEW_PORTS = new Set([22, 2222, 2375, 2376, 3108, 5900, 5901, 6080, 7818]);
+const RESERVED_PREVIEW_PORTS = new Set([
+  22, 2222, 2375, 2376, 3108, 5900, 5901, 6080, 7818,
+]);
 
 const CommandListSchema = z.array(z.string().trim().min(1).max(1000)).max(50);
 
@@ -38,7 +42,7 @@ const SandboxTemplateRuntimeSchema = z
   .strict()
   .refine(
     (runtime) => Boolean(runtime.base) !== Boolean(runtime.snapshot),
-    "runtime must declare exactly one of base or snapshot",
+    "runtime must declare exactly one of base or snapshot"
   );
 
 const SandboxTemplateResourcesSchema = z
@@ -53,13 +57,21 @@ const SandboxTemplateRequiredLeaseSchema = z
   .object({
     provider: z.enum(INTEGRATION_PROVIDERS),
     scopes: z.array(z.string().trim().min(1).max(200)).max(100).default([]),
-    capabilities: z.array(z.string().trim().min(1).max(200)).max(100).default([]),
+    capabilities: z
+      .array(z.string().trim().min(1).max(200))
+      .max(100)
+      .default([]),
   })
   .strict();
 
 const SandboxTemplateVolumeSchema = z
   .object({
-    name: z.string().trim().regex(/^[A-Za-z_][A-Za-z0-9_-]*$/).max(63).optional(),
+    name: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z_][A-Za-z0-9_-]*$/)
+      .max(63)
+      .optional(),
     mountPath: z.string().trim().min(1).max(256).optional(),
     storageGb: z.number().int().positive().max(100).optional(),
     deleteOnSandboxDelete: z.boolean().optional(),
@@ -156,7 +168,10 @@ const SandboxTemplateValidationProbeSchema = z
 
 const SandboxTemplateJsonSchema = z
   .record(z.string(), z.unknown())
-  .refine((schema) => schema.type === "object", "input schema must be a JSON schema object");
+  .refine(
+    (schema) => schema.type === "object",
+    "input schema must be a JSON schema object"
+  );
 
 const SandboxTemplateEnvInputSchema = z
   .object({
@@ -231,11 +246,14 @@ const SandboxTemplateScheduleSchema = z
             value: z.string().optional(),
             secretRef: z.string().optional(),
           })
-          .strict(),
+          .strict()
       )
       .max(100)
       .optional(),
-    integrationLeases: z.array(z.record(z.string(), z.unknown())).max(20).optional(),
+    integrationLeases: z
+      .array(z.record(z.string(), z.unknown()))
+      .max(20)
+      .optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
   })
   .strict()
@@ -315,7 +333,10 @@ export const SandboxTemplateManifestSchema = z
     validation: z
       .object({
         commands: CommandListSchema.min(1),
-        probes: z.array(SandboxTemplateValidationProbeSchema).max(20).default([]),
+        probes: z
+          .array(SandboxTemplateValidationProbeSchema)
+          .max(20)
+          .default([]),
       })
       .strict(),
     start: SandboxTemplateCommandSchema,
@@ -324,14 +345,20 @@ export const SandboxTemplateManifestSchema = z
     schedules: z.array(SandboxTemplateScheduleSchema).max(20).default([]),
     mcp: z
       .object({
-        endpoints: z.array(SandboxTemplateMcpEndpointSchema).max(10).default([]),
+        endpoints: z
+          .array(SandboxTemplateMcpEndpointSchema)
+          .max(10)
+          .default([]),
       })
       .strict()
       .default({ endpoints: [] }),
     volumes: z.array(SandboxTemplateVolumeSchema).max(5).default([]),
     integrations: z
       .object({
-        requiredLeases: z.array(SandboxTemplateRequiredLeaseSchema).max(20).default([]),
+        requiredLeases: z
+          .array(SandboxTemplateRequiredLeaseSchema)
+          .max(20)
+          .default([]),
       })
       .strict()
       .default({ requiredLeases: [] }),
@@ -362,7 +389,7 @@ export const SandboxTemplateManifestSchema = z
       context,
       manifest.volumes.flatMap((volume) => (volume.name ? [volume.name] : [])),
       "volume names must be unique",
-      "volumes",
+      "volumes"
     );
     validateInputSchemaUploadTargets(manifest, context);
     validateEnvInputs(manifest, context);
@@ -370,12 +397,19 @@ export const SandboxTemplateManifestSchema = z
     validateScheduleTargets(manifest, context);
   });
 
-export type SandboxTemplateManifest = z.infer<typeof SandboxTemplateManifestSchema>;
-export type SandboxTemplateResources = NonNullable<SandboxTemplateManifest["resources"]>;
-export type SandboxTemplatePort = SandboxTemplateManifest["start"]["ports"][number];
+export type SandboxTemplateManifest = z.infer<
+  typeof SandboxTemplateManifestSchema
+>;
+export type SandboxTemplateResources = NonNullable<
+  SandboxTemplateManifest["resources"]
+>;
+export type SandboxTemplatePort =
+  SandboxTemplateManifest["start"]["ports"][number];
 export type SandboxTemplateCommand = SandboxTemplateManifest["start"];
-export type SandboxTemplateNamedCommand = SandboxTemplateManifest["actions"][number];
-export type SandboxTemplateSchedule = SandboxTemplateManifest["schedules"][number];
+export type SandboxTemplateNamedCommand =
+  SandboxTemplateManifest["actions"][number];
+export type SandboxTemplateSchedule =
+  SandboxTemplateManifest["schedules"][number];
 export type SandboxTemplateVolume = SandboxTemplateManifest["volumes"][number];
 export type SandboxTemplateExecutableKind = "start" | "action" | "service";
 
@@ -418,7 +452,9 @@ export const SandboxTemplateValidationDiagnosticSchema = z.object({
   code: z.string(),
 });
 
-export function validateSandboxTemplateYaml(source: string): SandboxTemplateValidationResult {
+export function validateSandboxTemplateYaml(
+  source: string
+): SandboxTemplateValidationResult {
   let parsed: unknown;
   try {
     parsed = yaml.load(source);
@@ -438,7 +474,9 @@ export function validateSandboxTemplateYaml(source: string): SandboxTemplateVali
   return validateSandboxTemplateManifest(parsed);
 }
 
-export function validateSandboxTemplateManifest(value: unknown): SandboxTemplateValidationResult {
+export function validateSandboxTemplateManifest(
+  value: unknown
+): SandboxTemplateValidationResult {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {
       ok: false,
@@ -467,7 +505,8 @@ export function validateSandboxTemplateManifest(value: unknown): SandboxTemplate
     };
   }
   const result = SandboxTemplateManifestSchema.safeParse(value);
-  if (result.success) return { ok: true, manifest: result.data, diagnostics: [] };
+  if (result.success)
+    return { ok: true, manifest: result.data, diagnostics: [] };
   return {
     ok: false,
     manifest: null,
@@ -479,7 +518,9 @@ export function validateSandboxTemplateManifest(value: unknown): SandboxTemplate
   };
 }
 
-export function parseSandboxTemplateYaml(source: string): SandboxTemplateManifest {
+export function parseSandboxTemplateYaml(
+  source: string
+): SandboxTemplateManifest {
   const result = validateSandboxTemplateYaml(source);
   if (!result.ok) {
     throw new Error(formatSandboxTemplateDiagnostics(result.diagnostics));
@@ -488,23 +529,27 @@ export function parseSandboxTemplateYaml(source: string): SandboxTemplateManifes
 }
 
 export function formatSandboxTemplateDiagnostics(
-  diagnostics: SandboxTemplateValidationDiagnostic[],
+  diagnostics: SandboxTemplateValidationDiagnostic[]
 ): string {
-  return diagnostics.map((diagnostic) => `${diagnostic.path}: ${diagnostic.message}`).join("\n");
+  return diagnostics
+    .map((diagnostic) => `${diagnostic.path}: ${diagnostic.message}`)
+    .join("\n");
 }
 
-export function defineSandboxTemplate<T extends SandboxTemplateManifest>(template: T): T {
+export function defineSandboxTemplate<T extends SandboxTemplateManifest>(
+  template: T
+): T {
   return SandboxTemplateManifestSchema.parse(template) as T;
 }
 
 export function sandboxTemplateResources(
-  resources: Partial<SandboxTemplateResources> = {},
+  resources: Partial<SandboxTemplateResources> = {}
 ): SandboxTemplateResources {
   return SandboxTemplateResourcesSchema.parse(resources);
 }
 
 export function sandboxTemplateDurableVolume(
-  volume: SandboxTemplateVolume,
+  volume: SandboxTemplateVolume
 ): SandboxTemplateVolume {
   return SandboxTemplateVolumeSchema.parse({
     ...volume,
@@ -514,7 +559,7 @@ export function sandboxTemplateDurableVolume(
 
 export function sandboxTemplatePreviewPort(
   port: number,
-  options: Omit<Partial<SandboxTemplatePort>, "port"> = {},
+  options: Omit<Partial<SandboxTemplatePort>, "port"> = {}
 ): SandboxTemplatePort {
   return SandboxTemplatePortSchema.parse({
     ...options,
@@ -558,7 +603,7 @@ export type SandboxTemplateFileInputSchema =
     };
 
 export function sandboxTemplateFileInput(
-  options: SandboxTemplateFileInputOptions,
+  options: SandboxTemplateFileInputOptions
 ): SandboxTemplateFileInputSchema {
   const targetPath = RelativeWorkspacePathSchema.parse(options.targetPath);
   const accept = options.accept
@@ -594,7 +639,7 @@ export function sandboxTemplateFileInput(
 }
 
 export function sandboxTemplateExecutableEntries(
-  manifest: SandboxTemplateManifest,
+  manifest: SandboxTemplateManifest
 ): SandboxTemplateExecutable[] {
   return [
     {
@@ -626,7 +671,9 @@ export function sandboxTemplateExecutableEntries(
   ];
 }
 
-export function sandboxTemplateBuildMetadata(manifest: SandboxTemplateManifest): Record<string, unknown> {
+export function sandboxTemplateBuildMetadata(
+  manifest: SandboxTemplateManifest
+): Record<string, unknown> {
   const executables = sandboxTemplateExecutableEntries(manifest);
   return {
     template: {
@@ -654,7 +701,7 @@ export function sandboxTemplateBuildMetadata(manifest: SandboxTemplateManifest):
         port: port.port,
         access: port.access,
         label: port.label ?? null,
-      })),
+      }))
     ),
     appMcpEndpoints: manifest.mcp.endpoints.map((endpoint) => ({
       name: endpoint.name ?? null,
@@ -692,11 +739,12 @@ export type SandboxTemplateScaffoldInput = {
 };
 
 export function sandboxTemplateScaffoldFiles(
-  input: SandboxTemplateScaffoldInput,
+  input: SandboxTemplateScaffoldInput
 ): Record<string, string> {
   const displayName = input.name.trim() || "Sandbox Template";
   const name = slug(displayName);
-  const description = input.description?.trim() || `Local scaffold for ${displayName}.`;
+  const description =
+    input.description?.trim() || `Local scaffold for ${displayName}.`;
   return {
     ".gitignore": ["node_modules", "artifacts", ".DS_Store", ""].join("\n"),
     "README.md": [
@@ -722,7 +770,7 @@ export function sandboxTemplateScaffoldFiles(
         },
       },
       null,
-      2,
+      2
     )}\n`,
     [OPENPOND_MANIFEST_FILE_NAME]: [
       "schemaVersion: 1",
@@ -807,7 +855,10 @@ export function sandboxTemplateScaffoldFiles(
 }
 
 export function sandboxTemplateJsonSchema(): Record<string, unknown> {
-  return z.toJSONSchema(SandboxTemplateManifestSchema) as Record<string, unknown>;
+  return z.toJSONSchema(SandboxTemplateManifestSchema) as Record<
+    string,
+    unknown
+  >;
 }
 
 function isSafeRelativeWorkspacePath(value: string): boolean {
@@ -820,14 +871,18 @@ function isSafeRelativeWorkspacePath(value: string): boolean {
 
 function formatIssuePath(path: PropertyKey[]): string {
   if (path.length === 0) return "$";
-  return `$${path.map((part) => (typeof part === "number" ? `[${part}]` : `.${String(part)}`)).join("")}`;
+  return `$${path
+    .map((part) =>
+      typeof part === "number" ? `[${part}]` : `.${String(part)}`
+    )
+    .join("")}`;
 }
 
 function addDuplicateNameIssue(
   context: z.RefinementCtx,
   names: string[],
   message: string,
-  path: string,
+  path: string
 ): void {
   const seen = new Set<string>();
   for (const name of names) {
@@ -848,14 +903,19 @@ function validateExecutableNames(
     actions: Array<{ name: string }>;
     services: Array<{ name: string }>;
   },
-  context: z.RefinementCtx,
+  context: z.RefinementCtx
 ): void {
   const names = [
     "start",
     ...manifest.actions.map((action) => action.name),
     ...manifest.services.map((service) => service.name),
   ];
-  addDuplicateNameIssue(context, names, "start, action, and service names must be unique", "actions");
+  addDuplicateNameIssue(
+    context,
+    names,
+    "start, action, and service names must be unique",
+    "actions"
+  );
 }
 
 function validateInputSchemaUploadTargets(
@@ -863,27 +923,41 @@ function validateInputSchemaUploadTargets(
     inputs: { schema: Record<string, unknown> };
     volumes: Array<{ name?: string }>;
   },
-  context: z.RefinementCtx,
+  context: z.RefinementCtx
 ): void {
   const properties = asRecord(manifest.inputs.schema.properties);
   const volumeNames = new Set(
-    manifest.volumes.map((volume) => volume.name).filter((name): name is string => Boolean(name)),
+    manifest.volumes
+      .map((volume) => volume.name)
+      .filter((name): name is string => Boolean(name))
   );
   for (const [inputName, rawProperty] of Object.entries(properties)) {
     const property = asRecord(rawProperty);
-    const upload = asRecord(property["x-openpond-upload"] ?? property.xOpenPondUpload);
+    const upload = asRecord(
+      property["x-openpond-upload"] ?? property.xOpenPondUpload
+    );
     const targetPath =
       typeof upload.targetPath === "string" && upload.targetPath.trim()
         ? upload.targetPath.trim()
         : typeof upload.path === "string" && upload.path.trim()
-          ? upload.path.trim()
-          : "";
+        ? upload.path.trim()
+        : "";
     if (!targetPath) continue;
-    const normalizedTargetPath = targetPath.replace(/^workspace\//, "").replace(/^\/+/, "").replace(/\/+$/, "");
+    const normalizedTargetPath = targetPath
+      .replace(/^workspace\//, "")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
     if (!isSafeRelativeWorkspacePath(normalizedTargetPath)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["inputs", "schema", "properties", inputName, "x-openpond-upload", "targetPath"],
+        path: [
+          "inputs",
+          "schema",
+          "properties",
+          inputName,
+          "x-openpond-upload",
+          "targetPath",
+        ],
         message: "upload target must be a relative workspace path",
       });
       continue;
@@ -892,7 +966,14 @@ function validateInputSchemaUploadTargets(
     if (parts[0] === "volumes" && (!parts[1] || !volumeNames.has(parts[1]))) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["inputs", "schema", "properties", inputName, "x-openpond-upload", "targetPath"],
+        path: [
+          "inputs",
+          "schema",
+          "properties",
+          inputName,
+          "x-openpond-upload",
+          "targetPath",
+        ],
         message: "upload target references an undeclared volume",
       });
     }
@@ -903,13 +984,13 @@ function validateEnvInputs(
   manifest: {
     inputs: { env: Array<{ name: string }> };
   },
-  context: z.RefinementCtx,
+  context: z.RefinementCtx
 ): void {
   addDuplicateNameIssue(
     context,
     manifest.inputs.env.map((env) => env.name),
     "env input names must be unique",
-    "inputs",
+    "inputs"
   );
 }
 
@@ -919,18 +1000,18 @@ function validateMcpEndpoints(
     start: { ports: Array<{ port: number }> };
     mcp: { endpoints: Array<{ service?: string; port: number }> };
   },
-  context: z.RefinementCtx,
+  context: z.RefinementCtx
 ): void {
   const servicePorts = new Map(
     manifest.services.map((service) => [
       service.name,
       new Set(service.ports.map((port) => port.port)),
-    ]),
+    ])
   );
   const declaredPorts = new Set([
     ...manifest.start.ports.map((port) => port.port),
     ...manifest.services.flatMap((service) =>
-      service.ports.map((port) => port.port),
+      service.ports.map((port) => port.port)
     ),
   ]);
   for (const [index, endpoint] of manifest.mcp.endpoints.entries()) {
@@ -979,10 +1060,12 @@ function validateScheduleTargets(
       };
     }>;
   },
-  context: z.RefinementCtx,
+  context: z.RefinementCtx
 ): void {
   const actionNames = new Set(manifest.actions.map((action) => action.name));
-  const serviceNames = new Set(manifest.services.map((service) => service.name));
+  const serviceNames = new Set(
+    manifest.services.map((service) => service.name)
+  );
   for (const [index, schedule] of manifest.schedules.entries()) {
     const command = schedule.command ?? schedule.target?.command ?? null;
     if (schedule.target?.kind === "command" || command) {
@@ -1021,9 +1104,11 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function commandArtifactPaths(
   command: Pick<SandboxTemplateCommand, "artifactPaths">,
-  manifest: SandboxTemplateManifest,
+  manifest: SandboxTemplateManifest
 ): string[] {
-  return command.artifactPaths.length > 0 ? command.artifactPaths : manifest.artifacts.paths;
+  return command.artifactPaths.length > 0
+    ? command.artifactPaths
+    : manifest.artifacts.paths;
 }
 
 function slug(value: string): string {

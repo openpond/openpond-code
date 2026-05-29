@@ -14,7 +14,10 @@ export async function apiFetch(
     headers.set("openpond-api-key", effectiveApiKey);
   }
   if (token) {
-    headers.set("Authorization", tokenIsApiKey ? `ApiKey ${trimmedToken}` : `Bearer ${token}`);
+    headers.set(
+      "Authorization",
+      tokenIsApiKey ? `ApiKey ${trimmedToken}` : `Bearer ${token}`
+    );
   } else if (apiKey && !headers.has("Authorization")) {
     headers.set("Authorization", `ApiKey ${apiKey}`);
   }
@@ -24,7 +27,10 @@ export async function apiFetch(
   });
 }
 
-export async function readApiJson<T>(response: Response, label: string): Promise<T> {
+export async function readApiJson<T>(
+  response: Response,
+  label: string
+): Promise<T> {
   const payload = (await response.json().catch(() => ({}))) as T & {
     error?: unknown;
     message?: unknown;
@@ -34,9 +40,11 @@ export async function readApiJson<T>(response: Response, label: string): Promise
       typeof payload.message === "string"
         ? payload.message
         : typeof payload.error === "string"
-          ? payload.error
-          : "";
-    throw new Error(`${label} failed: ${response.status}${message ? ` ${message}` : ""}`);
+        ? payload.error
+        : "";
+    throw new Error(
+      `${label} failed: ${response.status}${message ? ` ${message}` : ""}`
+    );
   }
   return payload as T;
 }

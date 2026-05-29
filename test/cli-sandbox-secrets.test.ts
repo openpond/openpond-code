@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 
-import { createOpenPondSandboxClient } from "../src/sandbox";
+import { createOpenPondSandboxClient } from "../src/sandbox/client";
 
 const CLI_SECRET = "cli-secret-value-that-must-not-echo";
 
@@ -31,11 +31,13 @@ describe("sandbox secret CLI output redaction", () => {
           "--sandbox-api-url",
           sandboxApiUrl,
         ],
-        `${CLI_SECRET}\n`,
+        `${CLI_SECRET}\n`
       );
 
       expect(result.code).toBe(0);
-      expect(result.stdout).toContain("openpond://secret/team_test/secret_test#v1");
+      expect(result.stdout).toContain(
+        "openpond://secret/team_test/secret_test#v1"
+      );
       expect(result.stdout).not.toContain(CLI_SECRET);
       expect(result.stderr).not.toContain(CLI_SECRET);
       expect(requests[0]?.url).toBe("/v1/sandbox-secrets");
@@ -62,7 +64,9 @@ describe("sandbox secret CLI output redaction", () => {
     expect(result.code).not.toBe(0);
     expect(result.stdout).not.toContain(CLI_SECRET);
     expect(result.stderr).not.toContain(CLI_SECRET);
-    expect(result.stderr).toContain("sandbox secret values must be provided with --stdin or the masked prompt");
+    expect(result.stderr).toContain(
+      "sandbox secret values must be provided with --stdin or the masked prompt"
+    );
   });
 
   test("sandbox create sends secret refs and refuses secret-like literals without echoing plaintext", async () => {
@@ -102,7 +106,9 @@ describe("sandbox secret CLI output redaction", () => {
     expect(rejected.code).not.toBe(0);
     expect(rejected.stdout).not.toContain(CLI_SECRET);
     expect(rejected.stderr).not.toContain(CLI_SECRET);
-    expect(rejected.stderr).toContain("refusing plaintext value for secret-like env FOO_API_KEY");
+    expect(rejected.stderr).toContain(
+      "refusing plaintext value for secret-like env FOO_API_KEY"
+    );
   });
 
   test("sandbox create sends low-level sandbox runtime options", async () => {
@@ -339,10 +345,16 @@ describe("sandbox secret CLI output redaction", () => {
         idempotencyKey: "sdk_run",
       });
 
-      expect(project).toMatchObject({ id: "project_test", teamId: "team_test" });
+      expect(project).toMatchObject({
+        id: "project_test",
+        teamId: "team_test",
+      });
       expect(projectAgain.id).toBe(project.id);
       expect(projectUpdated.description).toBe("Updated SDK Project");
-      expect(agent).toMatchObject({ id: "agent_test", projectId: "project_test" });
+      expect(agent).toMatchObject({
+        id: "agent_test",
+        projectId: "project_test",
+      });
       expect(agentAgain.id).toBe(agent.id);
       expect(agentUpdated.triggerType).toBe("background");
       expect(result.run).toMatchObject({
@@ -360,7 +372,9 @@ describe("sandbox secret CLI output redaction", () => {
       ]);
       expect(requests[0]?.body).not.toHaveProperty("appId");
       expect(requests[1]?.body).not.toHaveProperty("appId");
-      expect(requests[2]?.body).toMatchObject({ description: "Updated SDK Project" });
+      expect(requests[2]?.body).toMatchObject({
+        description: "Updated SDK Project",
+      });
       expect(requests[2]?.body).not.toHaveProperty("appId");
       expect(requests[3]?.body).not.toHaveProperty("appId");
       expect(requests[4]?.body).not.toHaveProperty("appId");
@@ -401,9 +415,9 @@ describe("sandbox secret CLI output redaction", () => {
         "--summary",
         "checkpoint",
         "--payload",
-        "{\"artifact\":\"conversation-state\"}",
+        '{"artifact":"conversation-state"}',
         "--lifecycle-hint",
-        "{\"kind\":\"checkpoint\",\"reason\":\"no_user_reply_timeout\"}",
+        '{"kind":"checkpoint","reason":"no_user_reply_timeout"}',
         "--sandbox-api-url",
         sandboxApiUrl,
       ]);
@@ -430,7 +444,7 @@ describe("sandbox secret CLI output redaction", () => {
         expect.objectContaining({
           id: "workspace_test",
           status: "waiting_for_user",
-        }),
+        })
       );
       expect(JSON.parse(runtime.stdout).runtime).toMatchObject({
         id: "workspace_test",
@@ -450,17 +464,17 @@ describe("sandbox secret CLI output redaction", () => {
       });
       expect(requests.map((request) => request.url)).toContain("/v1/runtimes");
       expect(requests.map((request) => request.url)).toContain(
-        "/v1/runtimes/workspace_test",
+        "/v1/runtimes/workspace_test"
       );
       expect(requests.map((request) => request.url)).toContain(
-        "/v1/runtimes/workspace_test/events",
+        "/v1/runtimes/workspace_test/events"
       );
       expect(
         requests.some(
           (request) =>
             request.method === "PATCH" &&
-            request.url === "/v1/runtimes/workspace_test/status",
-        ),
+            request.url === "/v1/runtimes/workspace_test/status"
+        )
       ).toBe(true);
     });
   });
@@ -487,7 +501,7 @@ describe("sandbox secret CLI output redaction", () => {
       const exec = await runtime.commands.run("echo hi");
       const fileWrite = await runtime.files.write(
         "src/message.txt",
-        "hello from runtime files",
+        "hello from runtime files"
       );
       const fileRead = await runtime.files.read("src/message.txt");
       const waiting = await runtime.waitForUser({
@@ -592,10 +606,10 @@ describe("sandbox secret CLI output redaction", () => {
         ],
       });
       expect(requests.map((request) => request.url)).toContain(
-        "/v1/sandboxes/pricing",
+        "/v1/sandboxes/pricing"
       );
       expect(requests.map((request) => request.url)).toContain(
-        "/v1/sandboxes/costs?teamId=team_test",
+        "/v1/sandboxes/costs?teamId=team_test"
       );
     });
   });
@@ -613,7 +627,7 @@ describe("sandbox secret CLI output redaction", () => {
           "--sandbox-api-url",
           sandboxApiUrl,
         ],
-        `${CLI_SECRET}\n`,
+        `${CLI_SECRET}\n`
       );
       expect(created.code).toBe(0);
       expect(created.stdout).not.toContain(CLI_SECRET);
@@ -676,7 +690,7 @@ describe("sandbox secret CLI output redaction", () => {
           "--sandbox-api-url",
           sandboxApiUrl,
         ],
-        `${CLI_SECRET}\n`,
+        `${CLI_SECRET}\n`
       );
       const revoked = await runCli([
         "sandbox",
@@ -697,9 +711,13 @@ describe("sandbox secret CLI output redaction", () => {
         expect(result.code).toBe(0);
         expect(result.stdout).not.toContain(CLI_SECRET);
         expect(result.stderr).not.toContain(CLI_SECRET);
-        expect(result.stdout).toContain("openpond://secret/team_test/secret_test");
+        expect(result.stdout).toContain(
+          "openpond://secret/team_test/secret_test"
+        );
       }
-      expect(requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+      expect(
+        requests.map((request) => `${request.method} ${request.url}`)
+      ).toEqual([
         "GET /v1/sandbox-secrets",
         "POST /v1/sandbox-secrets/secret_test/attach",
         "POST /v1/sandbox-secrets/secret_test/rotate",
@@ -718,7 +736,9 @@ describe("sandbox secret CLI output redaction", () => {
   });
 
   test("sandbox template uploads reject .env files before reading them", async () => {
-    const projectDir = await mkdtemp(path.join(os.tmpdir(), "openpond-cli-env-upload-"));
+    const projectDir = await mkdtemp(
+      path.join(os.tmpdir(), "openpond-cli-env-upload-")
+    );
     try {
       await writeFile(
         path.join(projectDir, "openpond.yaml"),
@@ -753,7 +773,7 @@ describe("sandbox secret CLI output redaction", () => {
           "          targetPath: uploads",
           "",
         ].join("\n"),
-        "utf8",
+        "utf8"
       );
 
       const result = await runCli(
@@ -766,20 +786,24 @@ describe("sandbox secret CLI output redaction", () => {
           "http://127.0.0.1:9/v1/sandboxes",
         ],
         "",
-        { cwd: projectDir },
+        { cwd: projectDir }
       );
 
       expect(result.code).not.toBe(0);
       expect(result.stdout).not.toContain(CLI_SECRET);
       expect(result.stderr).not.toContain(CLI_SECRET);
-      expect(result.stderr).toContain("sandbox template uploads cannot include .env* files");
+      expect(result.stderr).toContain(
+        "sandbox template uploads cannot include .env* files"
+      );
     } finally {
       await rm(projectDir, { recursive: true, force: true });
     }
   });
 
   test("sandbox template env requirements validate without raw values", async () => {
-    const projectDir = await mkdtemp(path.join(os.tmpdir(), "openpond-cli-env-manifest-"));
+    const projectDir = await mkdtemp(
+      path.join(os.tmpdir(), "openpond-cli-env-manifest-")
+    );
     try {
       const manifestPath = path.join(projectDir, "openpond.yaml");
       const baseManifest = [
@@ -822,9 +846,9 @@ describe("sandbox secret CLI output redaction", () => {
         manifestPath,
         baseManifest.replace(
           "      description: API key for FOO.",
-          "      value: should-not-be-here",
+          "      value: should-not-be-here"
         ),
-        "utf8",
+        "utf8"
       );
       const invalid = await runCli(["sandbox-template", "validate"], "", {
         cwd: projectDir,
@@ -841,7 +865,9 @@ describe("sandbox secret CLI output redaction", () => {
   test("sandbox template start accepts input object schemas without properties", async () => {
     const requests: CapturedRequest[] = [];
     await withSandboxApi(requests, async (sandboxApiUrl) => {
-      const projectDir = await mkdtemp(path.join(os.tmpdir(), "openpond-cli-empty-inputs-"));
+      const projectDir = await mkdtemp(
+        path.join(os.tmpdir(), "openpond-cli-empty-inputs-")
+      );
       try {
         await writeFile(
           path.join(projectDir, "openpond.yaml"),
@@ -874,7 +900,7 @@ describe("sandbox secret CLI output redaction", () => {
             "      kind: start",
             "",
           ].join("\n"),
-          "utf8",
+          "utf8"
         );
 
         const result = await runCli(
@@ -889,14 +915,14 @@ describe("sandbox secret CLI output redaction", () => {
             sandboxApiUrl,
           ],
           "",
-          { cwd: projectDir },
+          { cwd: projectDir }
         );
 
         expect(result.code).toBe(0);
         const scheduleRequest = requests.find(
           (request) =>
             request.method === "POST" &&
-            request.url === "/v1/sandboxes/schedules",
+            request.url === "/v1/sandboxes/schedules"
         );
         expect(scheduleRequest?.body).toMatchObject({
           sourceSandboxId: "sandbox_test",
@@ -917,7 +943,9 @@ describe("sandbox secret CLI output redaction", () => {
   test("sandbox template start sends network, env refs, and sandbox runtime options", async () => {
     const requests: CapturedRequest[] = [];
     await withSandboxApi(requests, async (sandboxApiUrl) => {
-      const projectDir = await mkdtemp(path.join(os.tmpdir(), "openpond-cli-template-agent-"));
+      const projectDir = await mkdtemp(
+        path.join(os.tmpdir(), "openpond-cli-template-agent-")
+      );
       try {
         await writeFile(
           path.join(projectDir, "openpond.yaml"),
@@ -951,7 +979,7 @@ describe("sandbox secret CLI output redaction", () => {
             "  egress: allow",
             "",
           ].join("\n"),
-          "utf8",
+          "utf8"
         );
 
         const result = await runCli(
@@ -976,13 +1004,13 @@ describe("sandbox secret CLI output redaction", () => {
             sandboxApiUrl,
           ],
           "",
-          { cwd: projectDir },
+          { cwd: projectDir }
         );
 
         expect(result.code).toBe(0);
         const workspaceRequest = requests.find(
           (request) =>
-            request.method === "POST" && request.url === "/v1/runtimes",
+            request.method === "POST" && request.url === "/v1/runtimes"
         );
         expect(workspaceRequest?.body).toMatchObject({
           projectId: "project_test",
@@ -994,7 +1022,7 @@ describe("sandbox secret CLI output redaction", () => {
         const createRequest = requests.find(
           (request) =>
             request.method === "POST" &&
-            request.url === "/v1/runtimes/workspace_test/sandbox",
+            request.url === "/v1/runtimes/workspace_test/sandbox"
         );
         expect(createRequest?.body).toMatchObject({
           projectId: "project_test",
@@ -1013,13 +1041,13 @@ describe("sandbox secret CLI output redaction", () => {
         const processRequest = requests.find(
           (request) =>
             request.method === "POST" &&
-            request.url === "/v1/sandboxes/sandbox_test/processes",
+            request.url === "/v1/sandboxes/sandbox_test/processes"
         );
         expect(processRequest?.body.command).toContain(
-          "OPENPOND_SANDBOX_RUNTIME_ID='workspace_test'",
+          "OPENPOND_SANDBOX_RUNTIME_ID='workspace_test'"
         );
         expect(processRequest?.body.command).toContain(
-          "OPENPOND_SANDBOX_ID='sandbox_test'",
+          "OPENPOND_SANDBOX_ID='sandbox_test'"
         );
         expect(result.stdout).not.toContain(CLI_SECRET);
       } finally {
@@ -1031,7 +1059,7 @@ describe("sandbox secret CLI output redaction", () => {
 
 async function withSandboxApi(
   requests: CapturedRequest[],
-  callback: (sandboxApiUrl: string) => Promise<void>,
+  callback: (sandboxApiUrl: string) => Promise<void>
 ): Promise<void> {
   const server = createServer(async (request, response) => {
     const body = await readJsonBody(request);
@@ -1047,7 +1075,7 @@ async function withSandboxApi(
       response.end(
         JSON.stringify({
           secrets: [sandboxSecretRecord({ name: "FOO_API_KEY" })],
-        }),
+        })
       );
       return;
     }
@@ -1106,12 +1134,15 @@ async function withSandboxApi(
             recentReceipts: [],
             generatedAt: "2026-05-20T00:00:01.000Z",
           },
-        }),
+        })
       );
       return;
     }
 
-    if (request.url === "/v1/projects?teamId=team_test" && request.method === "GET") {
+    if (
+      request.url === "/v1/projects?teamId=team_test" &&
+      request.method === "GET"
+    ) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ projects: [sandboxProjectRecord()] }));
       return;
@@ -1127,7 +1158,7 @@ async function withSandboxApi(
             gitOwner: typeof body.gitOwner === "string" ? body.gitOwner : null,
             gitRepo: typeof body.gitRepo === "string" ? body.gitRepo : null,
           }),
-        }),
+        })
       );
       return;
     }
@@ -1152,7 +1183,7 @@ async function withSandboxApi(
             description:
               typeof body.description === "string" ? body.description : null,
           }),
-        }),
+        })
       );
       return;
     }
@@ -1165,12 +1196,15 @@ async function withSandboxApi(
       response.end(
         JSON.stringify({
           project: sandboxProjectRecord({ status: "archived" }),
-        }),
+        })
       );
       return;
     }
 
-    if (request.url === "/v1/agents?teamId=team_test" && request.method === "GET") {
+    if (
+      request.url === "/v1/agents?teamId=team_test" &&
+      request.method === "GET"
+    ) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ agents: [sandboxAgentRecord()] }));
       return;
@@ -1183,11 +1217,12 @@ async function withSandboxApi(
           agent: sandboxAgentRecord({
             name: String(body.name ?? "Daily Report"),
             selectedEntrypoint:
-              typeof body.selectedEntrypoint === "object" && body.selectedEntrypoint
+              typeof body.selectedEntrypoint === "object" &&
+              body.selectedEntrypoint
                 ? (body.selectedEntrypoint as Record<string, unknown>)
                 : undefined,
           }),
-        }),
+        })
       );
       return;
     }
@@ -1212,7 +1247,7 @@ async function withSandboxApi(
             triggerType:
               body.triggerType === "background" ? "background" : "manual",
           }),
-        }),
+        })
       );
       return;
     }
@@ -1225,7 +1260,7 @@ async function withSandboxApi(
       response.end(
         JSON.stringify({
           agent: sandboxAgentRecord({ status: "archived" }),
-        }),
+        })
       );
       return;
     }
@@ -1239,7 +1274,7 @@ async function withSandboxApi(
         JSON.stringify({
           agent: sandboxAgentRecord(),
           run: sandboxAgentRunRecord(body),
-        }),
+        })
       );
       return;
     }
@@ -1286,7 +1321,7 @@ async function withSandboxApi(
             },
           ],
           nextCursor: null,
-        }),
+        })
       );
       return;
     }
@@ -1308,7 +1343,7 @@ async function withSandboxApi(
             payload: body.payload ?? {},
             lifecycleHint: body.lifecycleHint ?? null,
           },
-        }),
+        })
       );
       return;
     }
@@ -1324,7 +1359,7 @@ async function withSandboxApi(
             ...sandboxRuntimeRecord(),
             status: body.status,
           },
-        }),
+        })
       );
       return;
     }
@@ -1333,8 +1368,10 @@ async function withSandboxApi(
       response.writeHead(201, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
-          secret: sandboxSecretRecord({ name: String(body.name ?? "FOO_API_KEY") }),
-        }),
+          secret: sandboxSecretRecord({
+            name: String(body.name ?? "FOO_API_KEY"),
+          }),
+        })
       );
       return;
     }
@@ -1358,7 +1395,7 @@ async function withSandboxApi(
               },
             ],
           }),
-        }),
+        })
       );
       return;
     }
@@ -1375,7 +1412,7 @@ async function withSandboxApi(
             secretRef: "openpond://secret/team_test/secret_test#v2",
             currentVersion: 2,
           }),
-        }),
+        })
       );
       return;
     }
@@ -1387,8 +1424,11 @@ async function withSandboxApi(
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
-          secret: sandboxSecretRecord({ name: "FOO_API_KEY", status: "revoked" }),
-        }),
+          secret: sandboxSecretRecord({
+            name: "FOO_API_KEY",
+            status: "revoked",
+          }),
+        })
       );
       return;
     }
@@ -1400,8 +1440,11 @@ async function withSandboxApi(
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
-          secret: sandboxSecretRecord({ name: "FOO_API_KEY", status: "deleted" }),
-        }),
+          secret: sandboxSecretRecord({
+            name: "FOO_API_KEY",
+            status: "deleted",
+          }),
+        })
       );
       return;
     }
@@ -1411,10 +1454,11 @@ async function withSandboxApi(
       response.end(
         JSON.stringify({
           runtime: sandboxRuntimeRecord({
-            projectId: typeof body.projectId === "string" ? body.projectId : null,
+            projectId:
+              typeof body.projectId === "string" ? body.projectId : null,
             agentId: typeof body.agentId === "string" ? body.agentId : null,
           }),
-        }),
+        })
       );
       return;
     }
@@ -1427,11 +1471,12 @@ async function withSandboxApi(
       response.end(
         JSON.stringify({
           runtime: sandboxRuntimeRecord({
-            projectId: typeof body.projectId === "string" ? body.projectId : null,
+            projectId:
+              typeof body.projectId === "string" ? body.projectId : null,
             agentId: typeof body.agentId === "string" ? body.agentId : null,
           }),
           sandbox: sandboxRecord({ runtimeId: "workspace_test" }),
-        }),
+        })
       );
       return;
     }
@@ -1441,43 +1486,55 @@ async function withSandboxApi(
       response.end(
         JSON.stringify({
           sandbox: sandboxRecord({ runtimeId: null }),
-        }),
+        })
       );
       return;
     }
 
-    if (request.url === "/v1/sandboxes/sandbox_test" && request.method === "GET") {
+    if (
+      request.url === "/v1/sandboxes/sandbox_test" &&
+      request.method === "GET"
+    ) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
           sandbox: sandboxRecord({ runtimeId: "workspace_test" }),
-        }),
+        })
       );
       return;
     }
 
-    if (request.url === "/v1/sandboxes/sandbox_test/start" && request.method === "POST") {
+    if (
+      request.url === "/v1/sandboxes/sandbox_test/start" &&
+      request.method === "POST"
+    ) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
           sandbox: sandboxRecord({ runtimeId: "workspace_test" }),
-        }),
+        })
       );
       return;
     }
 
-    if (request.url === "/v1/sandboxes/sandbox_test/exec" && request.method === "POST") {
+    if (
+      request.url === "/v1/sandboxes/sandbox_test/exec" &&
+      request.method === "POST"
+    ) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
           sandbox: sandboxRecord(),
           command: sandboxCommandRecord(String(body.command ?? "true")),
-        }),
+        })
       );
       return;
     }
 
-    if (request.url === "/v1/sandboxes/sandbox_test/files" && request.method === "POST") {
+    if (
+      request.url === "/v1/sandboxes/sandbox_test/files" &&
+      request.method === "POST"
+    ) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
@@ -1487,13 +1544,14 @@ async function withSandboxApi(
             sizeBytes: String(body.contentsBase64 ?? "").length,
             updatedAt: "2026-05-20T00:00:00.000Z",
           },
-        }),
+        })
       );
       return;
     }
 
     if (
-      request.url === "/v1/sandboxes/sandbox_test/files?path=src%2Fmessage.txt" &&
+      request.url ===
+        "/v1/sandboxes/sandbox_test/files?path=src%2Fmessage.txt" &&
       request.method === "GET"
     ) {
       response.writeHead(200, { "content-type": "application/json" });
@@ -1504,33 +1562,39 @@ async function withSandboxApi(
             path: "src/message.txt",
             contentsBase64: Buffer.from(
               "hello from runtime files",
-              "utf-8",
+              "utf-8"
             ).toString("base64"),
             sizeBytes: "24",
             updatedAt: "2026-05-20T00:00:00.000Z",
           },
-        }),
+        })
       );
       return;
     }
 
-    if (request.url === "/v1/sandboxes/sandbox_test/processes" && request.method === "POST") {
+    if (
+      request.url === "/v1/sandboxes/sandbox_test/processes" &&
+      request.method === "POST"
+    ) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
           sandbox: sandboxRecord(),
           process: sandboxProcessRecord(String(body.command ?? "echo ok")),
-        }),
+        })
       );
       return;
     }
 
-    if (request.url === "/v1/sandboxes/schedules" && request.method === "POST") {
+    if (
+      request.url === "/v1/sandboxes/schedules" &&
+      request.method === "POST"
+    ) {
       response.writeHead(201, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
           schedule: sandboxScheduleRecord(body),
-        }),
+        })
       );
       return;
     }
@@ -1553,29 +1617,42 @@ async function withSandboxApi(
   }
 }
 
-async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJsonBody(
+  request: IncomingMessage
+): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   if (chunks.length === 0) return {};
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<
+    string,
+    unknown
+  >;
 }
 
-function runCli(args: string[], stdin = "", options: { cwd?: string } = {}): Promise<{
+function runCli(
+  args: string[],
+  stdin = "",
+  options: { cwd?: string } = {}
+): Promise<{
   code: number | null;
   stdout: string;
   stderr: string;
 }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [path.join(process.cwd(), "src/cli-package.ts"), ...args], {
-      cwd: options.cwd ?? process.cwd(),
-      env: {
-        ...process.env,
-        OPENPOND_API_KEY: "opk_test_cli",
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    const child = spawn(
+      process.execPath,
+      [path.join(process.cwd(), "src/cli/main.ts"), ...args],
+      {
+        cwd: options.cwd ?? process.cwd(),
+        env: {
+          ...process.env,
+          OPENPOND_API_KEY: "opk_test_cli",
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      }
+    );
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -1595,7 +1672,7 @@ function runCli(args: string[], stdin = "", options: { cwd?: string } = {}): Pro
 }
 
 function sandboxRecord(
-  overrides: { runtimeId?: string | null } = {},
+  overrides: { runtimeId?: string | null } = {}
 ): Record<string, unknown> {
   return {
     id: "sandbox_test",
@@ -1636,7 +1713,7 @@ function sandboxRuntimeRecord(
   overrides: {
     projectId?: string | null;
     agentId?: string | null;
-  } = {},
+  } = {}
 ): Record<string, unknown> {
   return {
     id: "workspace_test",
@@ -1692,7 +1769,7 @@ function sandboxProjectRecord(
     sourceType?: string;
     gitOwner?: string | null;
     gitRepo?: string | null;
-  } = {},
+  } = {}
 ): Record<string, unknown> {
   return {
     id: "project_test",
@@ -1726,7 +1803,8 @@ function sandboxProjectRecord(
     metadata: {},
     createdAt: "2026-05-20T00:00:00.000Z",
     updatedAt: "2026-05-20T00:00:00.000Z",
-    archivedAt: overrides.status === "archived" ? "2026-05-20T00:00:00.000Z" : null,
+    archivedAt:
+      overrides.status === "archived" ? "2026-05-20T00:00:00.000Z" : null,
   };
 }
 
@@ -1736,7 +1814,7 @@ function sandboxAgentRecord(
     status?: string;
     triggerType?: string;
     selectedEntrypoint?: Record<string, unknown>;
-  } = {},
+  } = {}
 ): Record<string, unknown> {
   return {
     id: "agent_test",
@@ -1769,11 +1847,14 @@ function sandboxAgentRecord(
     metadata: {},
     createdAt: "2026-05-20T00:00:00.000Z",
     updatedAt: "2026-05-20T00:00:00.000Z",
-    archivedAt: overrides.status === "archived" ? "2026-05-20T00:00:00.000Z" : null,
+    archivedAt:
+      overrides.status === "archived" ? "2026-05-20T00:00:00.000Z" : null,
   };
 }
 
-function sandboxAgentRunRecord(input: Record<string, unknown>): Record<string, unknown> {
+function sandboxAgentRunRecord(
+  input: Record<string, unknown>
+): Record<string, unknown> {
   return {
     id: "agent_run_test",
     teamId: "team_test",
@@ -1820,7 +1901,9 @@ function sandboxProcessRecord(command: string): Record<string, unknown> {
   };
 }
 
-function sandboxScheduleRecord(input: Record<string, unknown>): Record<string, unknown> {
+function sandboxScheduleRecord(
+  input: Record<string, unknown>
+): Record<string, unknown> {
   return {
     id: "schedule_test",
     teamId: "team_test",
@@ -1915,7 +1998,8 @@ function sandboxPricingRateCard(): Record<string, unknown> {
       {
         key: "default",
         label: "Default",
-        description: "Normal app workspaces, small dev servers, and basic test runs.",
+        description:
+          "Normal app workspaces, small dev servers, and basic test runs.",
         resources: {
           cpu: 1,
           memoryGb: 2,
