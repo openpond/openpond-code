@@ -26,10 +26,13 @@ import type {
   SandboxRuntimeEventsResponse,
   SandboxRuntimePromoteInput,
   SandboxRuntimePromoteResponse,
+  SandboxRuntimeSourcePreserveInput,
+  SandboxRuntimeSourcePreserveResponse,
   SandboxRuntimeSandboxCreateInput,
   SandboxRuntimeSandboxResponse,
   SandboxRuntimeTransitionInput,
   SandboxState,
+  SandboxAsyncRequestOptions,
 } from "./index";
 export type SandboxSmokeOptions = {
   repo?: string;
@@ -124,10 +127,17 @@ export type OpenPondSandboxRuntimeHandle = {
   id: string;
   initial: SandboxRuntime | null;
   get(): Promise<SandboxRuntime>;
-  sandbox(input?: SandboxRuntimeSandboxCreateInput): Promise<SandboxRecord>;
-  resume(input?: SandboxRuntimeSandboxCreateInput): Promise<SandboxRecord>;
+  sandbox(
+    input?: SandboxRuntimeSandboxCreateInput,
+    options?: SandboxAsyncRequestOptions
+  ): Promise<SandboxRecord>;
+  resume(
+    input?: SandboxRuntimeSandboxCreateInput,
+    options?: SandboxAsyncRequestOptions
+  ): Promise<SandboxRecord>;
   createSandbox(
-    input?: SandboxRuntimeSandboxCreateInput
+    input?: SandboxRuntimeSandboxCreateInput,
+    options?: SandboxAsyncRequestOptions
   ): Promise<SandboxRuntimeSandboxResponse>;
   status(
     input: SandboxRuntimeTransitionInput | SandboxRuntime["status"]
@@ -155,5 +165,9 @@ export type OpenPondSandboxRuntimeHandle = {
     input: SandboxRuntimePromoteInput,
     options?: { teamId?: string }
   ): Promise<SandboxRuntimePromoteResponse>;
+  preserveSource(
+    input?: SandboxRuntimeSourcePreserveInput,
+    options?: { teamId?: string }
+  ): Promise<SandboxRuntimeSourcePreserveResponse>;
   archive(expectedVersion?: number): Promise<SandboxRuntime>;
 };

@@ -104,6 +104,43 @@ export type SandboxAgentRunStatus =
   | "succeeded"
   | "failed"
   | "cancelled";
+export type SandboxAgentRuntimeSourceMode =
+  | "latest_source"
+  | "published_snapshot"
+  | "auto";
+export type SandboxAgentRuntimeSourcePolicySource =
+  | "manual"
+  | "schedule"
+  | "endpoint"
+  | "background"
+  | "microsoft_teams"
+  | "diagnostic";
+
+export type SandboxAgentRuntimeSourceConfig = {
+  mode: SandboxAgentRuntimeSourceMode;
+  sourceRef: string | null;
+  sourceCommitSha: string | null;
+  publishedSnapshotId: string | null;
+  publishedSnapshotName: string | null;
+  publishedSnapshotVersion: string | null;
+  buildStatus: string | null;
+  validationStatus: string | null;
+  validatedAt: string | null;
+};
+
+export type SandboxAgentResolvedRuntimeSource =
+  SandboxAgentRuntimeSourceConfig & {
+    resolvedMode: "latest_source" | "published_snapshot";
+    policySource: SandboxAgentRuntimeSourcePolicySource;
+    reason: string;
+    resolvedAt: string;
+  };
+
+export type SandboxAgentRuntimeSourcePolicy = {
+  requirePublishedSnapshot?: boolean;
+  allowLatestSource?: boolean;
+  source?: SandboxAgentRuntimeSourcePolicySource;
+};
 
 export type SandboxAgentSelectedEntrypoint = {
   scope: SandboxAgentEntrypointScope;
@@ -166,6 +203,7 @@ export type SandboxAgent = {
   defaultResourcePolicy: Record<string, unknown>;
   defaultLifecyclePolicy: Record<string, unknown>;
   defaultCheckpointPolicy: Record<string, unknown>;
+  runtimeSource: SandboxAgentRuntimeSourceConfig;
   requiredIntegrationRefs: string[];
   requiredEnvironmentVariableRefs: string[];
   schedulePolicy: Record<string, unknown>;
@@ -188,6 +226,7 @@ export type SandboxAgentRun = {
   runtimeId: string | null;
   sandboxId: string | null;
   selectedEntrypoint: SandboxAgentSelectedEntrypoint;
+  runtimeSource: SandboxAgentResolvedRuntimeSource | null;
   input: Record<string, unknown>;
   metadata: Record<string, unknown>;
   createdAt: string;
@@ -223,6 +262,32 @@ export type SandboxProjectUpdateInput = { teamId: string } & Partial<
   Omit<SandboxProjectUpsertInput, "teamId">
 >;
 
+export type SandboxProjectSourceUploadEntry = {
+  path: string;
+  type: "file" | "directory";
+  contentsBase64?: string;
+};
+
+export type SandboxProjectSourceUploadInput = {
+  teamId: string;
+  entries: SandboxProjectSourceUploadEntry[];
+  branch?: string | null;
+  commitMessage?: string | null;
+};
+
+export type SandboxProjectGitRemote = {
+  repoUrl: string;
+  uiUrl: string;
+  teamSlug: string;
+  projectSlug: string;
+  defaultBranch: string;
+};
+
+export type SandboxProjectGitRemoteResponse = {
+  project: SandboxProject;
+  repo: SandboxProjectGitRemote;
+};
+
 export type SandboxAgentUpsertInput = {
   teamId: string;
   projectId: string;
@@ -242,6 +307,7 @@ export type SandboxAgentUpsertInput = {
   defaultResourcePolicy?: Record<string, unknown>;
   defaultLifecyclePolicy?: Record<string, unknown>;
   defaultCheckpointPolicy?: Record<string, unknown>;
+  runtimeSource?: Partial<SandboxAgentRuntimeSourceConfig> | null;
   requiredIntegrationRefs?: string[];
   requiredEnvironmentVariableRefs?: string[];
   schedulePolicy?: Record<string, unknown>;
@@ -260,6 +326,7 @@ export type SandboxAgentRunInput = {
   input?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   runtimeMode?: SandboxRuntimeMode;
+  runtimeSourcePolicy?: SandboxAgentRuntimeSourcePolicy;
 };
 
 export type SandboxProjectListResponse = { projects: SandboxProject[] };

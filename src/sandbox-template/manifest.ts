@@ -64,6 +64,20 @@ const SandboxTemplateRequiredLeaseSchema = z
   })
   .strict();
 
+const SandboxTemplateOpChatPermissionsSchema = z
+  .object({
+    models: z.array(z.string().trim().min(1).max(200)).max(100).default([]),
+    scopes: z.array(z.string().trim().min(1).max(200)).max(100).default([]),
+  })
+  .strict();
+
+const SandboxTemplatePermissionsSchema = z
+  .object({
+    opchat: SandboxTemplateOpChatPermissionsSchema.optional(),
+  })
+  .catchall(z.record(z.string(), z.unknown()))
+  .default({});
+
 const SandboxTemplateVolumeSchema = z
   .object({
     name: z
@@ -362,6 +376,7 @@ export const SandboxTemplateManifestSchema = z
       })
       .strict()
       .default({ requiredLeases: [] }),
+    permissions: SandboxTemplatePermissionsSchema,
     inputs: z
       .object({
         schema: SandboxTemplateJsonSchema.default({ type: "object" }),

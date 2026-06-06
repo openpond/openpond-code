@@ -16,11 +16,14 @@ import type {
   SandboxRuntimeEventInput,
   SandboxRuntimePromoteInput,
   SandboxRuntimePromoteResponse,
+  SandboxRuntimeSourcePreserveInput,
+  SandboxRuntimeSourcePreserveResponse,
   SandboxRuntimeSandboxCreateInput,
   SandboxRuntimeSandboxResponse,
   SandboxRuntimeTransitionInput,
   SandboxRuntimeEventsResponse,
   SandboxRuntimeEventResponse,
+  SandboxAsyncRequestOptions,
   SandboxFileUploadResponse,
   SandboxFileDownloadResponse,
   SandboxFileDeleteResponse,
@@ -37,7 +40,8 @@ export type SandboxRuntimeHandleClient = {
   getSandboxRuntime(runtimeId: string): Promise<SandboxRuntime>;
   createSandboxRuntimeSandbox(
     runtimeId: string,
-    input?: SandboxRuntimeSandboxCreateInput
+    input?: SandboxRuntimeSandboxCreateInput,
+    options?: SandboxAsyncRequestOptions
   ): Promise<SandboxRuntimeSandboxResponse>;
   updateSandboxRuntimeStatus(
     runtimeId: string,
@@ -59,8 +63,16 @@ export type SandboxRuntimeHandleClient = {
     input: SandboxRuntimePromoteInput,
     options?: { teamId?: string }
   ): Promise<SandboxRuntimePromoteResponse>;
+  preserveSandboxRuntimeSource(
+    runtimeId: string,
+    input?: SandboxRuntimeSourcePreserveInput,
+    options?: { teamId?: string }
+  ): Promise<SandboxRuntimeSourcePreserveResponse>;
   get(sandboxId: string): Promise<SandboxRecord>;
-  start(sandboxId: string): Promise<{ sandbox: SandboxRecord }>;
+  start(
+    sandboxId: string,
+    options?: SandboxAsyncRequestOptions
+  ): Promise<{ sandbox: SandboxRecord }>;
   restore(sandboxId: string): Promise<{ sandbox: SandboxRecord }>;
   uploadFile(
     sandboxId: string,
@@ -110,35 +122,37 @@ export function createSandboxRuntimeHandle(
   initial: SandboxRuntime | null = null
 ): OpenPondSandboxRuntimeHandle {
   const currentSandbox = async (
-    input: SandboxRuntimeSandboxCreateInput = {}
+    input: SandboxRuntimeSandboxCreateInput = {},
+    options: SandboxAsyncRequestOptions = {}
   ): Promise<SandboxRecord> => {
     const runtime = await client.getSandboxRuntime(runtimeId);
     if (runtime.sandboxId) {
       return client.get(runtime.sandboxId);
     }
     return client
-      .createSandboxRuntimeSandbox(runtimeId, input)
+      .createSandboxRuntimeSandbox(runtimeId, input, options)
       .then((payload) => payload.sandbox);
   };
   const resume = async (
-    input: SandboxRuntimeSandboxCreateInput = {}
+    input: SandboxRuntimeSandboxCreateInput = {},
+    options: SandboxAsyncRequestOptions = {}
   ): Promise<SandboxRecord> => {
     const runtime = await client.getSandboxRuntime(runtimeId);
     if (!runtime.sandboxId) {
       return client
-        .createSandboxRuntimeSandbox(runtimeId, input)
+        .createSandboxRuntimeSandbox(runtimeId, input, options)
         .then((payload) => payload.sandbox);
     }
     const sandbox = await client.get(runtime.sandboxId);
     if (sandbox.state === "stopped") {
-      return client.start(sandbox.id).then((payload) => payload.sandbox);
+      return client.start(sandbox.id, options).then((payload) => payload.sandbox);
     }
     if (sandbox.state === "archived") {
       return client.restore(sandbox.id).then((payload) => payload.sandbox);
     }
     if (sandbox.state === "deleted" || sandbox.state === "error") {
       return client
-        .createSandboxRuntimeSandbox(runtimeId, input)
+        .createSandboxRuntimeSandbox(runtimeId, input, options)
         .then((payload) => payload.sandbox);
     }
     return sandbox;
@@ -204,8 +218,8 @@ export function createSandboxRuntimeHandle(
     get: () => client.getSandboxRuntime(runtimeId),
     sandbox: currentSandbox,
     resume,
-    createSandbox: (input = {}) =>
-      client.createSandboxRuntimeSandbox(runtimeId, input),
+    createSandbox: (input = {}, options = {}) =>
+      client.createSandboxRuntimeSandbox(runtimeId, input, options),
     status: async (input) => {
       if (typeof input !== "string") {
         return client.updateSandboxRuntimeStatus(runtimeId, input);
@@ -258,6 +272,8 @@ export function createSandboxRuntimeHandle(
     },
     promote: (input, options = {}) =>
       client.promoteSandboxRuntime(runtimeId, input, options),
+    preserveSource: (input = {}, options = {}) =>
+      client.preserveSandboxRuntimeSource(runtimeId, input, options),
     archive: async (expectedVersion) => {
       const version =
         expectedVersion ?? (await client.getSandboxRuntime(runtimeId)).version;

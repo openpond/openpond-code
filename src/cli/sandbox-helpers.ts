@@ -17,6 +17,7 @@ import {
   parseJsonOption,
   parseNumberOption,
   parseSandboxEnvOptions,
+  parseSandboxRuntimeEnvironmentIdOption,
   parseSandboxRuntimeModeOption,
   parseSandboxRuntimePromotionPolicyOption,
   type SandboxCreatePlan,
@@ -138,7 +139,7 @@ export function formatSnapshotCatalogLine(snapshot: {
     snapshot.sandboxId,
     `storage=${snapshot.storage ?? "-"}`,
     `sizeGb=${snapshot.sizeGb ?? "-"}`,
-    `template=${template}`,
+    `publishedSnapshot=${template}`,
     `replay=${replayState}`,
     `retention=${retention}`,
     `monthlyUsd=${monthlyUsd}`,
@@ -415,6 +416,9 @@ export function buildSandboxCreateInput(
   const sandboxRuntimeMode = parseSandboxRuntimeModeOption(options.runtimeMode);
   const sandboxRuntimePromotionPolicy =
     parseSandboxRuntimePromotionPolicyOption(options.runtimePromotionPolicy);
+  const runtimeEnvironmentId = parseSandboxRuntimeEnvironmentIdOption(
+    options.runtimeEnvironmentId
+  );
   const sandboxRuntimeBaseBranch =
     typeof options.runtimeBaseBranch === "string" &&
     options.runtimeBaseBranch.trim()
@@ -433,6 +437,7 @@ export function buildSandboxCreateInput(
       sandboxRuntimePromotionPolicy ||
       sandboxRuntimeBaseBranch ||
       sandboxRuntimeBaseSha ||
+      runtimeEnvironmentId ||
       runtimeId ||
       sandboxRuntimeProjectId ||
       sandboxRuntimeAgentId
@@ -450,6 +455,7 @@ export function buildSandboxCreateInput(
     ...(teamId ? { teamId } : {}),
     ...(projectId ? { projectId } : {}),
     ...(agentId ? { agentId } : {}),
+    ...(runtimeEnvironmentId ? { runtimeEnvironmentId } : {}),
     ...(command ? { command } : {}),
     resources: {
       ...(cpu !== undefined ? { cpu } : {}),
@@ -514,6 +520,7 @@ export function buildSandboxCreateInput(
             ...(sandboxRuntimePromotionPolicy
               ? { promotionPolicy: sandboxRuntimePromotionPolicy }
               : {}),
+            ...(runtimeEnvironmentId ? { runtimeEnvironmentId } : {}),
           },
         }
       : {}),
@@ -560,11 +567,11 @@ export function buildTemplateBuildCreateInput(
   const manifestPath =
     typeof options.manifestPath === "string" ? options.manifestPath.trim() : "";
   if (!teamId) {
-    throw new Error("template-build-create requires --team-id <id>");
+    throw new Error("published-snapshot-build-create requires --team-id <id>");
   }
   if (!sourceRepoUrl && !sourceProjectId) {
     throw new Error(
-      "template-build-create requires --source-repo-url <url> or --source-project-id <id>"
+      "published-snapshot-build-create requires --source-repo-url <url> or --source-project-id <id>"
     );
   }
   return {

@@ -48,6 +48,7 @@ export type OpenPondClientOptions = {
   baseUrl?: string;
   apiUrl?: string;
   chatApiUrl?: string;
+  opChatApiUrl?: string;
   toolUrl?: string;
   cacheTtlMs?: number;
   useCache?: boolean;
@@ -95,6 +96,7 @@ export type OpenPondClient = {
   };
   chat: {
     models: () => Promise<import("./hosted-chat").HostedModelsResponse>;
+    model: (model: string) => Promise<import("./hosted-chat").HostedModel>;
     send: (
       input: Omit<
         import("./hosted-chat").HostedChatRequestOptions,

@@ -111,6 +111,7 @@ export type SandboxCreateInput = {
   teamId?: string;
   projectId?: string;
   agentId?: string;
+  runtimeEnvironmentId?: import("./runtime-environments.js").SandboxRuntimeEnvironmentId;
   command?: string;
   visibility?: "private" | "team";
   resources?: Partial<SandboxResources>;
@@ -124,6 +125,10 @@ export type SandboxCreateInput = {
   metadata?: Record<string, unknown>;
 };
 
-export type SandboxCreateOptions = {
+export type SandboxAsyncRequestOptions = {
   async?: boolean;
+  respondAsync?: boolean;
+  failOnUnpreservedChanges?: boolean;
 };
+
+export type SandboxCreateOptions = SandboxAsyncRequestOptions;

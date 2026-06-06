@@ -1,6 +1,12 @@
+import { Buffer } from "node:buffer";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+
 import type {
   SandboxAgent,
   SandboxAgentEntrypointScope,
+  SandboxAgentRuntimeSourceConfig,
+  SandboxAgentRuntimeSourceMode,
   SandboxAgentTriggerType,
   SandboxAgentUpdateInput,
   SandboxAgentUpsertInput,
@@ -18,7 +24,12 @@ import {
   parseSandboxRuntimePromotionPolicyOption,
   requiredTeamId,
   resolveSandboxClient,
+  runCommand,
 } from "./common";
+
+const PROJECT_SOURCE_UPLOAD_MAX_FILES = 1500;
+const PROJECT_SOURCE_UPLOAD_MAX_FILE_BYTES = 8 * 1024 * 1024;
+const PROJECT_SOURCE_UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
 
 export function parseProjectSourceType(
   value: string | boolean | undefined
@@ -79,6 +90,78 @@ export function parseAgentTriggerType(
     );
   }
   return triggerType;
+}
+
+export function parseAgentRuntimeSourceMode(
+  value: string | boolean | undefined
+): SandboxAgentRuntimeSourceMode | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("runtime-source-mode must be a non-empty value");
+  }
+  const mode = value.trim() as SandboxAgentRuntimeSourceMode;
+  if (
+    mode !== "latest_source" &&
+    mode !== "published_snapshot" &&
+    mode !== "auto"
+  ) {
+    throw new Error(
+      "runtime-source-mode must be one of latest_source, published_snapshot, auto"
+    );
+  }
+  return mode;
+}
+
+export function buildAgentRuntimeSourceConfig(
+  options: Record<string, string | boolean>
+): Partial<SandboxAgentRuntimeSourceConfig> | undefined {
+  const mode = parseAgentRuntimeSourceMode(options.runtimeSourceMode);
+  const sourceRef = optionString(options, "sourceRef");
+  const sourceCommitSha = optionString(options, "sourceCommitSha");
+  const publishedSnapshotId =
+    optionString(options, "publishedSnapshotId") ||
+    optionString(options, "snapshotId");
+  const publishedSnapshotName =
+    optionString(options, "publishedSnapshotName") ||
+    optionString(options, "snapshotName");
+  const publishedSnapshotVersion =
+    optionString(options, "publishedSnapshotVersion") ||
+    optionString(options, "snapshotVersion");
+  const buildStatus = optionString(options, "buildStatus");
+  const validationStatus = optionString(options, "validationStatus");
+  const validatedAt = optionString(options, "validatedAt");
+  const config: Partial<SandboxAgentRuntimeSourceConfig> = {
+    ...(mode ? { mode } : {}),
+    ...(sourceRef ? { sourceRef } : {}),
+    ...(sourceCommitSha ? { sourceCommitSha } : {}),
+    ...(publishedSnapshotId ? { publishedSnapshotId } : {}),
+    ...(publishedSnapshotName ? { publishedSnapshotName } : {}),
+    ...(publishedSnapshotVersion ? { publishedSnapshotVersion } : {}),
+    ...(buildStatus ? { buildStatus } : {}),
+    ...(validationStatus ? { validationStatus } : {}),
+    ...(validatedAt ? { validatedAt } : {}),
+  };
+  return Object.keys(config).length > 0 ? config : undefined;
+}
+
+function buildAgentRuntimeSourcePolicy(
+  options: Record<string, string | boolean>,
+  source: "manual" | "diagnostic" = "manual"
+) {
+  const requirePublishedSnapshot = parseBooleanOption(
+    options.requirePublishedSnapshot
+  );
+  const allowLatestSource = parseBooleanOption(options.allowLatestSource);
+  if (!requirePublishedSnapshot && !allowLatestSource && source === "manual") {
+    return undefined;
+  }
+  return {
+    source,
+    ...(requirePublishedSnapshot ? { requirePublishedSnapshot } : {}),
+    ...(allowLatestSource || source === "diagnostic"
+      ? { allowLatestSource: allowLatestSource || source === "diagnostic" }
+      : {}),
+  };
 }
 
 export function buildProjectUpsertInput(
@@ -279,6 +362,7 @@ export function buildAgentUpsertInput(
   const promotionPolicy = parseSandboxRuntimePromotionPolicyOption(
     options.runtimePromotionPolicy
   );
+  const runtimeSource = buildAgentRuntimeSourceConfig(options);
   const metadata = optionalJsonObject(options, "metadata", "metadata");
   return {
     teamId,
@@ -312,6 +396,7 @@ export function buildAgentUpsertInput(
       ? { sourceRefOverride: optionString(options, "sourceRefOverride") }
       : {}),
     ...(promotionPolicy ? { defaultPromotionPolicy: promotionPolicy } : {}),
+    ...(runtimeSource ? { runtimeSource } : {}),
     ...(optionalJsonObject(options, "endpointPolicy", "endpoint-policy")
       ? {
           endpointPolicy: optionalJsonObject(
@@ -396,6 +481,7 @@ export function buildAgentUpdateInput(
   const promotionPolicy = parseSandboxRuntimePromotionPolicyOption(
     options.runtimePromotionPolicy
   );
+  const runtimeSource = buildAgentRuntimeSourceConfig(options);
   const metadata = optionalJsonObject(options, "metadata", "metadata");
   return {
     teamId,
@@ -433,6 +519,7 @@ export function buildAgentUpdateInput(
       ? { sourceRefOverride: optionString(options, "sourceRefOverride") }
       : {}),
     ...(promotionPolicy ? { defaultPromotionPolicy: promotionPolicy } : {}),
+    ...(runtimeSource ? { runtimeSource } : {}),
     ...(optionalJsonObject(options, "endpointPolicy", "endpoint-policy")
       ? {
           endpointPolicy: optionalJsonObject(
@@ -525,14 +612,131 @@ export function formatAgentLine(agent: SandboxAgent): string {
   const entrypoint = agent.selectedEntrypoint.name
     ? `${agent.selectedEntrypoint.scope}:${agent.selectedEntrypoint.name}`
     : agent.selectedEntrypoint.scope;
+  const runtimeSource = agent.runtimeSource
+    ? [
+        agent.runtimeSource.mode,
+        agent.runtimeSource.publishedSnapshotName ??
+          agent.runtimeSource.publishedSnapshotId ??
+          agent.runtimeSource.sourceRef,
+      ]
+        .filter((value): value is string => Boolean(value))
+        .join(":")
+    : "latest_source";
   return [
     agent.id,
     agent.status,
     agent.triggerType,
     agent.defaultRuntimeMode,
+    runtimeSource,
     entrypoint,
     agent.name,
   ].join("  ");
+}
+
+function isSafeProjectSourcePath(filePath: string): boolean {
+  return (
+    filePath.length > 0 &&
+    !filePath.includes("\0") &&
+    !path.isAbsolute(filePath) &&
+    !filePath.split(/[\\/]+/).some((part) => !part || part === "." || part === "..")
+  );
+}
+
+function shouldSkipProjectSourcePath(filePath: string): boolean {
+  return filePath.split(/[\\/]+/).some((segment) => {
+    const lower = segment.toLowerCase();
+    return (
+      lower === ".git" ||
+      lower === "node_modules" ||
+      lower === ".next" ||
+      lower === ".turbo" ||
+      lower.startsWith(".env")
+    );
+  });
+}
+
+async function resolveProjectSourceUploadBranch(
+  projectPath: string,
+  options: Record<string, string | boolean>
+): Promise<string | null> {
+  const explicit = optionString(options, "branch");
+  if (explicit) return explicit;
+  const branch = await runCommand("git", ["branch", "--show-current"], {
+    cwd: projectPath,
+  });
+  if (branch.code !== 0) return null;
+  return branch.stdout.trim() || null;
+}
+
+async function collectProjectSourceUploadEntries(projectPath: string): Promise<{
+  entries: Array<{ path: string; type: "file"; contentsBase64: string }>;
+  fileCount: number;
+  totalBytes: number;
+}> {
+  const files = await runCommand(
+    "git",
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    { cwd: projectPath }
+  );
+  if (files.code !== 0) {
+    throw new Error(
+      `git ls-files failed: ${
+        files.stderr.trim() || files.stdout.trim() || "unknown error"
+      }`
+    );
+  }
+
+  const sourcePaths = files.stdout
+    .split("\0")
+    .map((filePath) => filePath.trim())
+    .filter(Boolean)
+    .filter((filePath) => {
+      const normalized = filePath.replace(/\\/g, "/");
+      return (
+        isSafeProjectSourcePath(normalized) &&
+        !shouldSkipProjectSourcePath(normalized)
+      );
+    });
+  if (sourcePaths.length === 0) {
+    throw new Error("no source files found to upload");
+  }
+  if (sourcePaths.length > PROJECT_SOURCE_UPLOAD_MAX_FILES) {
+    throw new Error(
+      `too many source files to upload: ${sourcePaths.length} > ${PROJECT_SOURCE_UPLOAD_MAX_FILES}`
+    );
+  }
+
+  let totalBytes = 0;
+  const entries: Array<{ path: string; type: "file"; contentsBase64: string }> = [];
+  for (const sourcePath of sourcePaths.sort()) {
+    const absolutePath = path.resolve(projectPath, sourcePath);
+    const relative = path.relative(projectPath, absolutePath);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error(`source path escapes project: ${sourcePath}`);
+    }
+    const stat = await fs.stat(absolutePath);
+    if (!stat.isFile()) continue;
+    if (stat.size > PROJECT_SOURCE_UPLOAD_MAX_FILE_BYTES) {
+      throw new Error(
+        `source file is too large: ${sourcePath} (${stat.size} bytes)`
+      );
+    }
+    totalBytes += stat.size;
+    if (totalBytes > PROJECT_SOURCE_UPLOAD_MAX_BYTES) {
+      throw new Error(
+        `source upload is too large: ${totalBytes} > ${PROJECT_SOURCE_UPLOAD_MAX_BYTES}`
+      );
+    }
+    entries.push({
+      path: sourcePath.replace(/\\/g, "/"),
+      type: "file",
+      contentsBase64: Buffer.from(await fs.readFile(absolutePath)).toString(
+        "base64"
+      ),
+    });
+  }
+
+  return { entries, fileCount: entries.length, totalBytes };
 }
 
 export async function runProjectCommand(
@@ -603,6 +807,48 @@ export async function runProjectCommand(
     return;
   }
 
+  if (subcommand === "source-upload" || subcommand === "upload-source") {
+    const projectId = rest[1]?.trim();
+    const teamId = requiredTeamId(
+      options,
+      "usage: project source-upload <projectId>"
+    );
+    if (!projectId) {
+      throw new Error(
+        "usage: project source-upload <projectId> --team-id <id> [--path <dir>]"
+      );
+    }
+    const projectPath = path.resolve(optionString(options, "path") || ".");
+    const branch = await resolveProjectSourceUploadBranch(projectPath, options);
+    const commitMessage =
+      optionString(options, "commitMessage") ||
+      optionString(options, "commit-message") ||
+      "Upload OpenPond project source";
+    const collected = await collectProjectSourceUploadEntries(projectPath);
+    const project = await client.projects.uploadSource(projectId, {
+      teamId,
+      entries: collected.entries,
+      ...(branch ? { branch } : {}),
+      commitMessage,
+    });
+    console.log(
+      JSON.stringify(
+        {
+          project,
+          uploaded: {
+            path: projectPath,
+            branch,
+            fileCount: collected.fileCount,
+            totalBytes: collected.totalBytes,
+          },
+        },
+        null,
+        2
+      )
+    );
+    return;
+  }
+
   if (subcommand === "archive") {
     const projectId = rest[1]?.trim();
     const teamId = requiredTeamId(
@@ -618,7 +864,7 @@ export async function runProjectCommand(
   }
 
   throw new Error(
-    "usage: project <list|create|upsert|get|update|sync|archive> [--team-id <id>] [--name <name>]"
+    "usage: project <list|create|upsert|get|update|sync|source-upload|archive> [--team-id <id>] [--name <name>]"
   );
 }
 
@@ -674,6 +920,7 @@ export async function runAgentCommand(
     const runtimeMode = parseSandboxRuntimeModeOption(options.runtimeMode);
     const inputObject = optionalJsonObject(options, "input", "input");
     const metadata = optionalJsonObject(options, "metadata", "metadata");
+    const runtimeSourcePolicy = buildAgentRuntimeSourcePolicy(options);
     const result = await client.agents.run(agentId, {
       teamId,
       ...(idempotencyKey ? { idempotencyKey } : {}),
@@ -681,8 +928,73 @@ export async function runAgentCommand(
       ...(runtimeMode ? { runtimeMode } : {}),
       ...(inputObject ? { input: inputObject } : {}),
       ...(metadata ? { metadata } : {}),
+      ...(runtimeSourcePolicy ? { runtimeSourcePolicy } : {}),
     });
     console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (subcommand === "bind-runtime-source" || subcommand === "bind-source") {
+    const agentId = rest[1]?.trim();
+    const teamId = requiredTeamId(
+      options,
+      "usage: agent bind-runtime-source <agentId>"
+    );
+    if (!agentId) {
+      throw new Error(
+        "usage: agent bind-runtime-source <agentId> --team-id <id> --runtime-source-mode latest_source|published_snapshot|auto"
+      );
+    }
+    const runtimeSource = buildAgentRuntimeSourceConfig(options);
+    if (!runtimeSource?.mode) {
+      throw new Error(
+        "usage: agent bind-runtime-source <agentId> --team-id <id> --runtime-source-mode latest_source|published_snapshot|auto"
+      );
+    }
+    const agent = await client.agents.update(agentId, {
+      teamId,
+      runtimeSource,
+    });
+    console.log(JSON.stringify({ agent, runtimeSource: agent.runtimeSource }, null, 2));
+    return;
+  }
+
+  if (subcommand === "run-test") {
+    const agentId = rest[1]?.trim();
+    const teamId = requiredTeamId(options, "usage: agent run-test <agentId>");
+    if (!agentId) {
+      throw new Error("usage: agent run-test <agentId> --team-id <id>");
+    }
+    const idempotencyKey = optionString(options, "idempotencyKey");
+    const inputObject = optionalJsonObject(options, "input", "input");
+    const metadata = optionalJsonObject(options, "metadata", "metadata");
+    const runtimeMode = parseSandboxRuntimeModeOption(options.runtimeMode);
+    const result = await client.agents.run(agentId, {
+      teamId,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+      ...(runtimeMode ? { runtimeMode } : {}),
+      ...(inputObject ? { input: inputObject } : {}),
+      metadata: {
+        ...(metadata ?? {}),
+        source: "agent_run_test",
+      },
+      runtimeSourcePolicy: buildAgentRuntimeSourcePolicy(
+        options,
+        "diagnostic"
+      ),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          resolvedRuntimeSource: result.run.runtimeSource,
+          agent: result.agent,
+          run: result.run,
+          sandbox: result.sandbox ?? null,
+        },
+        null,
+        2
+      )
+    );
     return;
   }
 
@@ -712,6 +1024,6 @@ export async function runAgentCommand(
   }
 
   throw new Error(
-    "usage: agent <list|create|upsert|get|update|run|archive> [--team-id <id>] [--project-id <id>] [--name <name>]"
+    "usage: agent <list|create|upsert|get|update|run|run-test|bind-runtime-source|archive> [--team-id <id>] [--project-id <id>] [--name <name>]"
   );
 }

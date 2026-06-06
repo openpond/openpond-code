@@ -20,12 +20,14 @@ import {
 } from "../cache";
 import { loadConfig, saveGlobalConfig, type LocalConfig } from "../config";
 import type { OpenPondSandboxClient } from "../sandbox/client";
+import { SANDBOX_RUNTIME_ENVIRONMENT_IDS } from "../sandbox/types/index";
 import type {
   SandboxCreateInput,
   SandboxEnvVarInput,
   SandboxRecord,
   SandboxRuntime,
   SandboxRuntimeCreateInput,
+  SandboxRuntimeEnvironmentId,
   SandboxRuntimeMode,
   SandboxRuntimePromotionPolicy,
   SandboxSecretMetadata,
@@ -55,6 +57,9 @@ export const SANDBOX_RUNTIME_MODES: SandboxRuntimeMode[] = [
 ];
 export const SANDBOX_RUNTIME_PROMOTION_POLICIES: SandboxRuntimePromotionPolicy[] =
   ["none", "manual", "auto_after_checks"];
+export const SANDBOX_RUNTIME_ENVIRONMENTS: SandboxRuntimeEnvironmentId[] = [
+  ...SANDBOX_RUNTIME_ENVIRONMENT_IDS,
+];
 
 export type Command =
   | "login"
@@ -73,6 +78,8 @@ export type Command =
   | "organization"
   | "organizations"
   | "template"
+  | "teams-bot"
+  | "opchat"
   | "opentool"
   | "check-update"
   | "version"
@@ -284,7 +291,7 @@ export function resolveSandboxBaseUrl(
       ? options.environment.trim().toLowerCase()
       : "";
   if (envName === "staging") {
-    return "https://api.staging-api.openpond.ai";
+    return "https://api-new.staging-api.openpond.ai";
   }
   if (envName && envName !== "production") {
     throw new Error("sandbox env must be staging or production");
@@ -497,6 +504,21 @@ export function parseSandboxRuntimePromotionPolicyOption(
     );
   }
   return policy;
+}
+
+export function parseSandboxRuntimeEnvironmentIdOption(
+  value: string | boolean | undefined
+): SandboxRuntimeEnvironmentId | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const environmentId = value.trim() as SandboxRuntimeEnvironmentId;
+  if (!SANDBOX_RUNTIME_ENVIRONMENTS.includes(environmentId)) {
+    throw new Error(
+      `runtime-environment-id must be one of ${SANDBOX_RUNTIME_ENVIRONMENTS.join(
+        ", "
+      )}`
+    );
+  }
+  return environmentId;
 }
 
 export function parseSandboxEnvOptions(

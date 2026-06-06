@@ -127,6 +127,8 @@ describe("sandbox secret CLI output redaction", () => {
         "master",
         "--runtime-promotion-policy",
         "manual",
+        "--runtime-environment-id",
+        "openpond-coding-core-v1",
         "--sandbox-api-url",
         sandboxApiUrl,
       ]);
@@ -142,10 +144,12 @@ describe("sandbox secret CLI output redaction", () => {
         mode: "feature",
         baseBranch: "master",
         promotionPolicy: "manual",
+        runtimeEnvironmentId: "openpond-coding-core-v1",
       });
       expect(requests[1]?.body).toMatchObject({
         projectId: "project_test",
         agentId: "agent_test",
+        runtimeEnvironmentId: "openpond-coding-core-v1",
       });
       expect("sandboxRuntime" in (requests[1]?.body ?? {})).toBe(false);
       expect("workspacePurpose" in (requests[0]?.body ?? {})).toBe(false);
@@ -555,6 +559,101 @@ describe("sandbox secret CLI output redaction", () => {
           kind: "waiting_for_user",
           reason: "awaiting_next_prompt",
         },
+      });
+    });
+  });
+
+  test("sandbox SDK and CLI expose patch export, source preservation, and guarded lifecycle", async () => {
+    const requests: CapturedRequest[] = [];
+    await withSandboxApi(requests, async (sandboxApiUrl) => {
+      const client = createOpenPondSandboxClient({
+        apiKey: "opk_test_cli",
+        sandboxApiUrl,
+      });
+
+      const exported = await client.gitExportPatch("sandbox_test", {
+        baseRef: "openpond/base",
+      });
+      const preserved = await client.runtimes.preserveSource(
+        "workspace_test",
+        {
+          sandboxId: "sandbox_test",
+          message: "Preserve hosted changes",
+        },
+        { teamId: "team_test" }
+      );
+      await client.stop("sandbox_test", {
+        failOnUnpreservedChanges: true,
+      });
+      await client.delete("sandbox_test", {
+        failOnUnpreservedChanges: true,
+      });
+
+      const cliPatch = await runCli([
+        "sandbox",
+        "git-export-patch",
+        "sandbox_test",
+        "--base-ref",
+        "openpond/base",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+      const cliPreserve = await runCli([
+        "sandbox",
+        "runtime-preserve-source",
+        "workspace_test",
+        "--team-id",
+        "team_test",
+        "--sandbox-id",
+        "sandbox_test",
+        "--message",
+        "Preserve hosted changes",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+      const cliStop = await runCli([
+        "sandbox",
+        "stop",
+        "sandbox_test",
+        "--fail-on-unpreserved-changes",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+      const cliDelete = await runCli([
+        "sandbox",
+        "delete",
+        "sandbox_test",
+        "--fail-on-unpreserved-changes",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+
+      expect(exported.patch.sha256).toBe("a".repeat(64));
+      expect(preserved.preservedSha).toBe("feed123");
+      for (const result of [cliPatch, cliPreserve, cliStop, cliDelete]) {
+        expect(result.code).toBe(0);
+      }
+      expect(JSON.parse(cliPatch.stdout).patch.sha256).toBe("a".repeat(64));
+      expect(JSON.parse(cliPreserve.stdout).preservedSha).toBe("feed123");
+      expect(requests.map((request) => request.url)).toEqual([
+        "/v1/sandboxes/sandbox_test/git/export-patch",
+        "/v1/runtimes/workspace_test/preserve-source?teamId=team_test",
+        "/v1/sandboxes/sandbox_test/stop?failOnUnpreservedChanges=true",
+        "/v1/sandboxes/sandbox_test?failOnUnpreservedChanges=true",
+        "/v1/sandboxes/sandbox_test/git/export-patch",
+        "/v1/runtimes/workspace_test/preserve-source?teamId=team_test",
+        "/v1/sandboxes/sandbox_test/stop?failOnUnpreservedChanges=true",
+        "/v1/sandboxes/sandbox_test?failOnUnpreservedChanges=true",
+      ]);
+      expect(requests[0]?.body).toEqual({ baseRef: "openpond/base" });
+      expect(requests[1]?.body).toEqual({
+        sandboxId: "sandbox_test",
+        message: "Preserve hosted changes",
+      });
+      expect(requests[4]?.body).toEqual({ baseRef: "openpond/base" });
+      expect(requests[5]?.body).toEqual({
+        sandboxId: "sandbox_test",
+        message: "Preserve hosted changes",
       });
     });
   });
@@ -1364,6 +1463,26 @@ async function withSandboxApi(
       return;
     }
 
+    if (
+      request.url ===
+        "/v1/runtimes/workspace_test/preserve-source?teamId=team_test" &&
+      request.method === "POST"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          runtime: {
+            ...sandboxRuntimeRecord(),
+            currentSha: "feed123",
+          },
+          preservedSha: "feed123",
+          preserved: true,
+          patch: sandboxGitPatchExportRecord(body),
+        })
+      );
+      return;
+    }
+
     if (request.url === "/v1/sandbox-secrets" && request.method === "POST") {
       response.writeHead(201, { "content-type": "application/json" });
       response.end(
@@ -1532,6 +1651,56 @@ async function withSandboxApi(
     }
 
     if (
+      request.url === "/v1/sandboxes/sandbox_test/git/export-patch" &&
+      request.method === "POST"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          sandbox: sandboxRecord({ runtimeId: "workspace_test" }),
+          patch: sandboxGitPatchExportRecord(body),
+        })
+      );
+      return;
+    }
+
+    if (
+      request.url ===
+        "/v1/sandboxes/sandbox_test/stop?failOnUnpreservedChanges=true" &&
+      request.method === "POST"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          sandbox: sandboxRecord({ runtimeId: "workspace_test" }),
+          receipt: {
+            ref: "sandbox_stop_receipt_test",
+            status: "accepted",
+          },
+        })
+      );
+      return;
+    }
+
+    if (
+      request.url ===
+        "/v1/sandboxes/sandbox_test?failOnUnpreservedChanges=true" &&
+      request.method === "DELETE"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          sandbox: {
+            ...sandboxRecord({ runtimeId: "workspace_test" }),
+            state: "deleted",
+            deletedAt: "2026-05-20T00:01:00.000Z",
+          },
+        })
+      );
+      return;
+    }
+
+    if (
       request.url === "/v1/sandboxes/sandbox_test/files" &&
       request.method === "POST"
     ) {
@@ -1685,6 +1854,27 @@ function sandboxRecord(
     visibility: "private",
     ownerUserId: "user_test",
     runtimeId: overrides.runtimeId ?? null,
+    runtimeEnvironmentId: "openpond-coding-core-v1",
+    workspaceRoot: "/workspace/project",
+    runtimeEnvironment: {
+      id: "openpond-coding-core-v1",
+      label: "OpenPond Coding Core",
+      version: 1,
+      workspaceRoot: "/workspace/project",
+      defaultExecutionProfileId: "firecracker-direct-k8s",
+      requiredTools: ["git", "sh", "rg", "curl", "tar", "unzip"],
+      excludedToolchains: ["node", "bun", "python", "browser"],
+      capabilities: [
+        "files",
+        "exec",
+        "processes",
+        "pty",
+        "ports",
+        "preview",
+        "git",
+      ],
+    },
+    runtimeProfileId: "firecracker-direct-k8s",
     billingAccountId: "billing_test",
     resources: { cpu: 1, memoryGb: 1, diskGb: 4 },
     budget: { maxUsd: "0.05" },
@@ -1706,6 +1896,24 @@ function sandboxRecord(
     startedAt: "2026-05-20T00:00:00.000Z",
     stoppedAt: null,
     deletedAt: null,
+  };
+}
+
+function sandboxGitPatchExportRecord(
+  input: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    isRepo: true,
+    baseRef:
+      typeof input.baseRef === "string" && input.baseRef.trim()
+        ? input.baseRef.trim()
+        : "openpond/base",
+    patch: "diff --git a/README.md b/README.md\n",
+    filename: "sandbox_test-abc123.patch",
+    sha256: "a".repeat(64),
+    bytes: 35,
+    lineCount: 2,
+    empty: false,
   };
 }
 
@@ -1754,6 +1962,27 @@ function sandboxRuntimeRecord(
     },
     promotionPolicy: "manual",
     permissions: {},
+    runtimeEnvironmentId: "openpond-coding-core-v1",
+    workspaceRoot: "/workspace/project",
+    runtimeEnvironment: {
+      id: "openpond-coding-core-v1",
+      label: "OpenPond Coding Core",
+      version: 1,
+      workspaceRoot: "/workspace/project",
+      defaultExecutionProfileId: "firecracker-direct-k8s",
+      requiredTools: ["git", "sh", "rg", "curl", "tar", "unzip"],
+      excludedToolchains: ["node", "bun", "python", "browser"],
+      capabilities: [
+        "files",
+        "exec",
+        "processes",
+        "pty",
+        "ports",
+        "preview",
+        "git",
+      ],
+    },
+    runtimeProfileId: "firecracker-direct-k8s",
     metadata: {},
     version: 2,
     createdAt: "2026-05-20T00:00:00.000Z",

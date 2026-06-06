@@ -12,21 +12,25 @@ export async function handleSandboxTemplateBuildsCommand(
   rest: string[]
 ): Promise<boolean> {
   if (
+    subcommand === "published-snapshot-builds" ||
+    subcommand === "published-snapshot-build-list" ||
     subcommand === "template-builds" ||
     subcommand === "template-build-list"
   ) {
     const teamId =
       typeof options.teamId === "string" ? options.teamId.trim() : "";
     if (!teamId) {
-      throw new Error("usage: sandbox template-builds --team-id <id>");
+      throw new Error(
+        "usage: sandbox published-snapshot-builds --team-id <id>"
+      );
     }
-    const builds = await client.listTemplateBuilds({ teamId });
+    const builds = await client.listPublishedSnapshotBuilds({ teamId });
     if (parseBooleanOption(options.json)) {
       console.log(JSON.stringify({ builds }, null, 2));
       return true;
     }
     if (builds.length === 0) {
-      console.log("no sandbox template builds found");
+      console.log("no published snapshot builds found");
       return true;
     }
     for (const build of builds) {
@@ -36,10 +40,12 @@ export async function handleSandboxTemplateBuildsCommand(
   }
 
   if (
+    subcommand === "published-snapshot-build-create" ||
+    subcommand === "create-published-snapshot-build" ||
     subcommand === "template-build-create" ||
     subcommand === "create-template-build"
   ) {
-    const build = await client.createTemplateBuild(
+    const build = await client.createPublishedSnapshotBuild(
       buildTemplateBuildCreateInput(options)
     );
     console.log(JSON.stringify({ build }, null, 2));
@@ -47,27 +53,31 @@ export async function handleSandboxTemplateBuildsCommand(
   }
 
   if (
+    subcommand === "published-snapshot-build-get" ||
+    subcommand === "get-published-snapshot-build" ||
     subcommand === "template-build-get" ||
     subcommand === "get-template-build"
   ) {
     const buildId = rest[1];
     if (!buildId) {
-      throw new Error("usage: sandbox template-build-get <buildId>");
+      throw new Error("usage: sandbox published-snapshot-build-get <buildId>");
     }
-    const build = await client.getTemplateBuild(buildId);
+    const build = await client.getPublishedSnapshotBuild(buildId);
     console.log(JSON.stringify({ build }, null, 2));
     return true;
   }
 
   if (
+    subcommand === "published-snapshot-build-logs" ||
+    subcommand === "published-snapshot-build-log" ||
     subcommand === "template-build-logs" ||
     subcommand === "template-build-log"
   ) {
     const buildId = rest[1];
     if (!buildId) {
-      throw new Error("usage: sandbox template-build-logs <buildId>");
+      throw new Error("usage: sandbox published-snapshot-build-logs <buildId>");
     }
-    const logs = await client.getTemplateBuildLogs(buildId);
+    const logs = await client.getPublishedSnapshotBuildLogs(buildId);
     if (parseBooleanOption(options.json)) {
       console.log(JSON.stringify(logs, null, 2));
       return true;
@@ -79,25 +89,31 @@ export async function handleSandboxTemplateBuildsCommand(
   }
 
   if (
+    subcommand === "published-snapshot-build-cancel" ||
+    subcommand === "cancel-published-snapshot-build" ||
     subcommand === "template-build-cancel" ||
     subcommand === "cancel-template-build"
   ) {
     const buildId = rest[1];
     if (!buildId) {
-      throw new Error("usage: sandbox template-build-cancel <buildId>");
+      throw new Error(
+        "usage: sandbox published-snapshot-build-cancel <buildId>"
+      );
     }
-    const build = await client.cancelTemplateBuild(buildId);
+    const build = await client.cancelPublishedSnapshotBuild(buildId);
     console.log(JSON.stringify({ build }, null, 2));
     return true;
   }
 
   if (
+    subcommand === "published-snapshot-build-watch" ||
+    subcommand === "watch-published-snapshot-build" ||
     subcommand === "template-build-watch" ||
     subcommand === "watch-template-build"
   ) {
     const buildId = rest[1];
     if (!buildId) {
-      throw new Error("usage: sandbox template-build-watch <buildId>");
+      throw new Error("usage: sandbox published-snapshot-build-watch <buildId>");
     }
     const intervalMs =
       parseIntegerOption(options.intervalMs, "interval-ms") ?? 5000;
@@ -107,8 +123,8 @@ export async function handleSandboxTemplateBuildsCommand(
     const seenLogs = new Set<string>();
     while (Date.now() - startedAt <= timeoutMs) {
       const [build, logs] = await Promise.all([
-        client.getTemplateBuild(buildId),
-        client.getTemplateBuildLogs(buildId),
+        client.getPublishedSnapshotBuild(buildId),
+        client.getPublishedSnapshotBuildLogs(buildId),
       ]);
       for (const line of logs.logs) {
         if (!seenLogs.has(line)) {
@@ -124,7 +140,7 @@ export async function handleSandboxTemplateBuildsCommand(
         console.log(formatTemplateBuildLine(build));
         if (build.status !== "succeeded") {
           throw new Error(
-            `sandbox template build ${build.status}: ${
+            `published snapshot build ${build.status}: ${
               build.error ?? "no error"
             }`
           );
@@ -134,7 +150,7 @@ export async function handleSandboxTemplateBuildsCommand(
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
     throw new Error(
-      `sandbox template build did not finish within ${timeoutMs}ms`
+      `published snapshot build did not finish within ${timeoutMs}ms`
     );
   }
 

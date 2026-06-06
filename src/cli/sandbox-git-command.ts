@@ -52,6 +52,33 @@ export async function handleSandboxGitCommand(
     return true;
   }
 
+  if (subcommand === "git-export-patch") {
+    const sandboxId = rest[1];
+    if (!sandboxId) {
+      throw new Error(
+        "usage: sandbox git-export-patch <sandboxId> [--base-ref <ref>]"
+      );
+    }
+    const baseRef =
+      typeof options.baseRef === "string" && options.baseRef.trim()
+        ? options.baseRef.trim()
+        : undefined;
+    const result = await client.gitExportPatch(sandboxId, {
+      ...(baseRef ? { baseRef } : {}),
+    });
+    console.log(
+      JSON.stringify(
+        {
+          sandbox: summarizeSandbox(result.sandbox),
+          patch: result.patch,
+        },
+        null,
+        2
+      )
+    );
+    return true;
+  }
+
   if (subcommand === "git-branch") {
     const sandboxId = rest[1];
     const branch =

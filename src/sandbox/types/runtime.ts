@@ -1,4 +1,10 @@
-import type { SandboxCreateInput, SandboxCreateResponse } from "./index";
+import type {
+  SandboxCreateInput,
+  SandboxCreateResponse,
+  SandboxGitPatchExport,
+  SandboxRuntimeEnvironmentId,
+  SandboxRuntimeEnvironmentSummary,
+} from "./index";
 export type SandboxRuntimeMode =
   | "readonly"
   | "attempt"
@@ -74,6 +80,10 @@ export type SandboxRuntime = {
   artifactRefs: string[];
   promotionPolicy: SandboxRuntimePromotionPolicy;
   permissions: SandboxRuntimePermissions;
+  runtimeEnvironmentId: SandboxRuntimeEnvironmentId;
+  workspaceRoot: string;
+  runtimeEnvironment: SandboxRuntimeEnvironmentSummary;
+  runtimeProfileId?: string | null;
   version: number;
   metadata: Record<string, unknown>;
   createdAt: string;
@@ -114,6 +124,7 @@ export type SandboxRuntimeCreateInput = {
   sandboxId?: string;
   rootfsSnapshotId?: string;
   dependencySnapshotId?: string;
+  runtimeEnvironmentId?: SandboxRuntimeEnvironmentId;
   promotionPolicy?: SandboxRuntimePromotionPolicy;
   metadata?: Record<string, unknown>;
 };
@@ -143,6 +154,11 @@ export type SandboxRuntimePromoteInput = {
   expectedTargetSha: string;
   validationState?: "pending" | "passed";
   summary?: string;
+};
+
+export type SandboxRuntimeSourcePreserveInput = {
+  sandboxId?: string;
+  message?: string;
 };
 
 export type SandboxRuntimeTransitionInput = {
@@ -177,4 +193,11 @@ export type SandboxRuntimeEventsResponse = {
 export type SandboxRuntimePromoteResponse = {
   runtime: SandboxRuntime;
   promotedSha: string;
+};
+
+export type SandboxRuntimeSourcePreserveResponse = {
+  runtime: SandboxRuntime;
+  preservedSha: string | null;
+  preserved: boolean;
+  patch: SandboxGitPatchExport;
 };

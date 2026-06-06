@@ -62,6 +62,12 @@ describe("sandbox template helpers", () => {
       schedules: [],
       mcp: { endpoints: [] },
       integrations: { requiredLeases: [] },
+      permissions: {
+        opchat: {
+          models: ["openpond-chat"],
+          scopes: ["opchat:model:read", "opchat:chat:create"],
+        },
+      },
       artifacts: { paths: [] },
       network: { egress: "restricted" },
       setup: { commands: [] },
@@ -75,6 +81,10 @@ describe("sandbox template helpers", () => {
       port: 3000,
       access: "private",
       path: "/",
+    });
+    expect(result.ok ? result.manifest.permissions.opchat : null).toMatchObject({
+      models: ["openpond-chat"],
+      scopes: ["opchat:model:read", "opchat:chat:create"],
     });
   });
 
