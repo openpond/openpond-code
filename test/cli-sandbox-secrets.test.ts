@@ -156,6 +156,78 @@ describe("sandbox secret CLI output redaction", () => {
     });
   });
 
+  test("sandbox create sends image and Dockerfile runtime sources", async () => {
+    const imageRequests: CapturedRequest[] = [];
+    await withSandboxApi(imageRequests, async (sandboxApiUrl) => {
+      const result = await runCli([
+        "sandbox",
+        "create",
+        "--image",
+        "python:3.12-slim-bookworm",
+        "--image-digest",
+        `sha256:${"a".repeat(64)}`,
+        "--registry-secret-ref",
+        "openpond://secret/team_test/registry#v1",
+        "--command",
+        "python --version",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+
+      expect(result.code).toBe(0);
+      expect(imageRequests[0]?.url).toBe("/v1/sandboxes");
+      expect(imageRequests[0]?.body).toMatchObject({
+        command: "python --version",
+        runtime: {
+          image: {
+            ref: "python:3.12-slim-bookworm",
+            digest: `sha256:${"a".repeat(64)}`,
+            registrySecretRef: "openpond://secret/team_test/registry#v1",
+            platform: "linux/amd64",
+          },
+        },
+      });
+    });
+
+    const dockerfileRequests: CapturedRequest[] = [];
+    await withSandboxApi(dockerfileRequests, async (sandboxApiUrl) => {
+      const result = await runCli([
+        "sandbox",
+        "create",
+        "--dockerfile",
+        "docker/Dockerfile",
+        "--dockerfile-context",
+        ".",
+        "--dockerfile-target",
+        "runtime",
+        "--docker-build-args",
+        '{"NODE_VERSION":"20"}',
+        "--docker-registry-secret-refs",
+        "openpond://secret/team_test/registry#v1",
+        "--runtime-workspace-root",
+        "/workspace/app",
+        "--sandbox-api-url",
+        sandboxApiUrl,
+      ]);
+
+      expect(result.code).toBe(0);
+      expect(dockerfileRequests[0]?.url).toBe("/v1/sandboxes");
+      expect(dockerfileRequests[0]?.body).toMatchObject({
+        runtime: {
+          dockerfile: {
+            path: "docker/Dockerfile",
+            context: ".",
+            target: "runtime",
+            buildArgs: { NODE_VERSION: "20" },
+            registrySecretRefs: ["openpond://secret/team_test/registry#v1"],
+            workspaceRoot: "/workspace/app",
+            platform: "linux/amd64",
+          },
+        },
+      });
+    });
+  });
+
   test("project and agent commands use first-class sandbox API resources", async () => {
     const requests: CapturedRequest[] = [];
     await withSandboxApi(requests, async (sandboxApiUrl) => {
@@ -1149,6 +1221,89 @@ describe("sandbox secret CLI output redaction", () => {
           "OPENPOND_SANDBOX_ID='sandbox_test'"
         );
         expect(result.stdout).not.toContain(CLI_SECRET);
+      } finally {
+        await rm(projectDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  test("sandbox template start sends Dockerfile runtime source", async () => {
+    const requests: CapturedRequest[] = [];
+    await withSandboxApi(requests, async (sandboxApiUrl) => {
+      const projectDir = await mkdtemp(
+        path.join(os.tmpdir(), "openpond-cli-template-dockerfile-")
+      );
+      try {
+        await writeFile(
+          path.join(projectDir, "openpond.yaml"),
+          [
+            "schemaVersion: 1",
+            "name: dockerfile-template-start",
+            "version: 0.0.1",
+            "useCase: sandbox-template-example",
+            "description: Dockerfile template start test.",
+            "runtime:",
+            "  dockerfile:",
+            "    context: .",
+            "    path: Dockerfile",
+            "    target: runtime",
+            "    buildArgs:",
+            "      NODE_VERSION: \"20\"",
+            "resources:",
+            "  cpu: 1",
+            "  memoryGb: 1",
+            "  diskGb: 4",
+            "start:",
+            "  command: node app.js",
+            "actions: []",
+            "services: []",
+            "validation:",
+            "  commands:",
+            "    - test -f Dockerfile",
+            "",
+          ].join("\n"),
+          "utf8"
+        );
+        await writeFile(
+          path.join(projectDir, "Dockerfile"),
+          "FROM node:20\n",
+          "utf8"
+        );
+
+        const result = await runCli(
+          [
+            "sandbox-template",
+            "start",
+            "--repo",
+            "https://github.com/octocat/Hello-World",
+            "--sandbox-api-url",
+            sandboxApiUrl,
+          ],
+          "",
+          { cwd: projectDir }
+        );
+
+        expect(result.code).toBe(0);
+        const createRequest = requests.find(
+          (request) =>
+            request.method === "POST" && request.url === "/v1/sandboxes"
+        );
+        expect(createRequest?.body).toMatchObject({
+          runtime: {
+            dockerfile: {
+              context: ".",
+              path: "Dockerfile",
+              target: "runtime",
+              buildArgs: { NODE_VERSION: "20" },
+            },
+          },
+        });
+        const processRequest = requests.find(
+          (request) =>
+            request.method === "POST" &&
+            request.url === "/v1/sandboxes/sandbox_test/processes"
+        );
+        expect(processRequest?.body.command).toContain("node app.js");
       } finally {
         await rm(projectDir, { recursive: true, force: true });
       }

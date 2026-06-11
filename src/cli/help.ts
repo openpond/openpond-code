@@ -196,10 +196,16 @@ export function printHelp(): void {
   );
   console.log("  openpond sandbox snapshot-publish <sandboxId> <snapshotId>");
   console.log(
-    "  openpond sandbox create [--repo <url>] [--budget-usd 0.05] [--env-ref NAME=openpond://secret/...] [--env-literal NAME=value] [--project-id <id>] [--agent-id <id>] [--runtime-environment-id openpond-coding-core-v1] [--runtime-mode feature --runtime-project-id <projectId> --runtime-base-branch master]"
+    "  openpond sandbox create [--repo <url>] [--image python:3.12-slim-bookworm | --dockerfile Dockerfile] [--budget-usd 0.05] [--env-ref NAME=openpond://secret/...] [--env-literal NAME=value] [--project-id <id>] [--agent-id <id>] [--runtime-environment-id openpond-coding-core-v1] [--runtime-mode feature --runtime-project-id <projectId> --runtime-base-branch master]"
   );
   console.log(
     "    example: openpond sandbox create --runtime-environment-id openpond-coding-core-v1 --runtime-mode feature --runtime-project-id project_123 --runtime-base-branch master"
+  );
+  console.log(
+    "    example: openpond sandbox create --image python:3.12-slim-bookworm --command 'python --version'"
+  );
+  console.log(
+    "    example: openpond sandbox create --dockerfile Dockerfile --dockerfile-context . --docker-build-args '{\"NODE_VERSION\":\"20\"}'"
   );
   console.log('  openpond sandbox exec <sandboxId> --command "bun test"');
   console.log(

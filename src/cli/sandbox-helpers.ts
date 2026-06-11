@@ -416,6 +416,7 @@ export function buildSandboxCreateInput(
   const sandboxRuntimeMode = parseSandboxRuntimeModeOption(options.runtimeMode);
   const sandboxRuntimePromotionPolicy =
     parseSandboxRuntimePromotionPolicyOption(options.runtimePromotionPolicy);
+  const runtimeSource = buildSandboxRuntimeSourceInput(options);
   const runtimeEnvironmentId = parseSandboxRuntimeEnvironmentIdOption(
     options.runtimeEnvironmentId
   );
@@ -457,6 +458,7 @@ export function buildSandboxCreateInput(
     ...(agentId ? { agentId } : {}),
     ...(runtimeEnvironmentId ? { runtimeEnvironmentId } : {}),
     ...(command ? { command } : {}),
+    ...(runtimeSource ? { runtime: runtimeSource } : {}),
     resources: {
       ...(cpu !== undefined ? { cpu } : {}),
       ...(memoryGb !== undefined ? { memoryGb } : {}),
@@ -525,6 +527,74 @@ export function buildSandboxCreateInput(
         }
       : {}),
   };
+}
+
+function buildSandboxRuntimeSourceInput(
+  options: Record<string, string | boolean>
+): SandboxCreateInput["runtime"] | undefined {
+  const imageRef = stringOption(options.image);
+  const dockerfilePath = stringOption(options.dockerfile);
+  if (imageRef && dockerfilePath) {
+    throw new Error("sandbox create accepts only one of --image or --dockerfile");
+  }
+  const workspaceRoot = stringOption(options.runtimeWorkspaceRoot);
+  if (imageRef) {
+    return {
+      image: {
+        ref: imageRef,
+        ...(stringOption(options.imageDigest)
+          ? { digest: stringOption(options.imageDigest) }
+          : {}),
+        ...(stringOption(options.registrySecretRef)
+          ? { registrySecretRef: stringOption(options.registrySecretRef) }
+          : {}),
+        ...(workspaceRoot ? { workspaceRoot } : {}),
+        platform: "linux/amd64",
+      },
+    };
+  }
+  if (dockerfilePath) {
+    const buildArgs = parseDockerBuildArgs(options.dockerBuildArgs);
+    const registrySecretRefs = parseCsvOption(options.dockerRegistrySecretRefs);
+    return {
+      dockerfile: {
+        path: dockerfilePath,
+        context: stringOption(options.dockerfileContext) || ".",
+        ...(stringOption(options.dockerfileTarget)
+          ? { target: stringOption(options.dockerfileTarget) }
+          : {}),
+        ...(Object.keys(buildArgs).length > 0 ? { buildArgs } : {}),
+        ...(registrySecretRefs.length > 0 ? { registrySecretRefs } : {}),
+        ...(workspaceRoot ? { workspaceRoot } : {}),
+        platform: "linux/amd64",
+      },
+    };
+  }
+  return undefined;
+}
+
+function parseDockerBuildArgs(
+  value: string | boolean | undefined
+): Record<string, string> {
+  if (typeof value !== "string" || !value.trim()) {
+    return {};
+  }
+  const parsed = parseJsonOption(value, "docker-build-args");
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("docker-build-args must be a JSON object");
+  }
+  const result: Record<string, string> = {};
+  for (const [key, rawValue] of Object.entries(parsed)) {
+    if (typeof rawValue !== "string") {
+      throw new Error("docker-build-args values must be strings");
+    }
+    result[key] = rawValue;
+  }
+  return result;
+}
+
+function stringOption(value: string | boolean | undefined): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 export function buildSandboxIntegrationAttachInput(

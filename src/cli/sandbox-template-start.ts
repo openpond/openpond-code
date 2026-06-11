@@ -265,6 +265,7 @@ export function buildSandboxTemplateStartCreateInput(
       sandboxRuntimeAgentId
   );
   const env = parseSandboxTemplateEnvOptions(manifest, options);
+  const runtime = sandboxRuntimeSourceFromManifest(manifest);
   const sandbox: SandboxCreateInput = {
     repo,
     ...(teamId ? { teamId } : {}),
@@ -283,6 +284,7 @@ export function buildSandboxTemplateStartCreateInput(
       ...(idleTimeoutSeconds !== undefined ? { idleTimeoutSeconds } : {}),
     },
     ...(env.length > 0 ? { env } : {}),
+    ...(runtime ? { runtime } : {}),
     volumes: manifest.volumes,
     metadata: {
       source: "openpond-code-sandbox-template-start",
@@ -315,6 +317,18 @@ export function buildSandboxTemplateStartCreateInput(
         }
       : {}),
   };
+}
+
+function sandboxRuntimeSourceFromManifest(
+  manifest: SandboxTemplateManifest
+): SandboxCreateInput["runtime"] | undefined {
+  if (manifest.runtime.image) {
+    return { image: manifest.runtime.image };
+  }
+  if (manifest.runtime.dockerfile) {
+    return { dockerfile: manifest.runtime.dockerfile };
+  }
+  return undefined;
 }
 
 export function sandboxTemplateInternetEgressPolicy(

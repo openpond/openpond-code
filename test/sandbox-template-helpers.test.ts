@@ -94,4 +94,59 @@ describe("sandbox template helpers", () => {
       sandboxTemplateFileInput({ targetPath: "../outside" })
     ).toThrow();
   });
+
+  test("validates Docker image and Dockerfile runtime sources", () => {
+    const base = {
+      schemaVersion: 1,
+      name: "docker-runtime-template",
+      version: "0.1.0",
+      useCase: "docker-runtime-test",
+      description: "Docker runtime manifest.",
+      resources: { cpu: 1, memoryGb: 2, diskGb: 8 },
+      validation: { commands: ["python --version"], probes: [] },
+      start: {
+        command: "python app.py",
+        ports: [],
+      },
+      actions: [],
+      services: [],
+      schedules: [],
+    };
+
+    expect(
+      validateSandboxTemplateManifest({
+        ...base,
+        runtime: {
+          image: {
+            ref: "python:3.12-slim-bookworm",
+            workspaceRoot: "/workspace/project",
+          },
+        },
+      }).ok
+    ).toBe(true);
+    expect(
+      validateSandboxTemplateManifest({
+        ...base,
+        runtime: {
+          dockerfile: {
+            context: ".",
+            path: "Dockerfile",
+            buildArgs: { NODE_VERSION: "20" },
+          },
+        },
+      }).ok
+    ).toBe(true);
+
+    const invalid = validateSandboxTemplateManifest({
+      ...base,
+      runtime: {
+        base: "node-bun-workspace",
+        image: { ref: "python:3.12-slim-bookworm" },
+      },
+    });
+    expect(invalid.ok).toBe(false);
+    expect(invalid.ok ? "" : invalid.diagnostics[0]?.message).toContain(
+      "exactly one of base, snapshot, image, or dockerfile"
+    );
+  });
 });
