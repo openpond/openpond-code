@@ -20,7 +20,7 @@ import {
 import {
   parseIntegerOption,
   parseJsonOption,
-  parseSandboxRuntimeModeOption,
+  parseSandboxWorkflowModeOption,
   parseSandboxRuntimePromotionPolicyOption,
   parseSandboxTemplateEnvOptions,
   resolveSandboxClient,
@@ -239,7 +239,7 @@ export function buildSandboxTemplateStartCreateInput(
     );
   }
   const agentId = requestedAgentId || sandboxRuntimeAgentId;
-  const sandboxRuntimeMode = parseSandboxRuntimeModeOption(options.runtimeMode);
+  const sandboxWorkflowMode = parseSandboxWorkflowModeOption(options.workflowMode);
   const sandboxRuntimePromotionPolicy =
     parseSandboxRuntimePromotionPolicyOption(options.runtimePromotionPolicy);
   const sandboxRuntimeBaseBranch =
@@ -256,7 +256,7 @@ export function buildSandboxTemplateStartCreateInput(
       ? options.runtimeId.trim()
       : "";
   const sandboxRuntimeRequested = Boolean(
-    sandboxRuntimeMode ||
+    sandboxWorkflowMode ||
       sandboxRuntimePromotionPolicy ||
       sandboxRuntimeBaseBranch ||
       sandboxRuntimeBaseSha ||
@@ -265,7 +265,7 @@ export function buildSandboxTemplateStartCreateInput(
       sandboxRuntimeAgentId
   );
   const env = parseSandboxTemplateEnvOptions(manifest, options);
-  const runtime = sandboxRuntimeSourceFromManifest(manifest);
+  const workloadSource = sandboxWorkloadSourceFromManifest(manifest);
   const sandbox: SandboxCreateInput = {
     repo,
     ...(teamId ? { teamId } : {}),
@@ -284,7 +284,7 @@ export function buildSandboxTemplateStartCreateInput(
       ...(idleTimeoutSeconds !== undefined ? { idleTimeoutSeconds } : {}),
     },
     ...(env.length > 0 ? { env } : {}),
-    ...(runtime ? { runtime } : {}),
+    ...(workloadSource ? { workloadSource } : {}),
     volumes: manifest.volumes,
     metadata: {
       source: "openpond-code-sandbox-template-start",
@@ -303,7 +303,7 @@ export function buildSandboxTemplateStartCreateInput(
       ? {
           sandboxRuntime: {
             ...(teamId ? { teamId } : {}),
-            ...(sandboxRuntimeMode ? { mode: sandboxRuntimeMode } : {}),
+            ...(sandboxWorkflowMode ? { workflowMode: sandboxWorkflowMode } : {}),
             ...(projectId ? { projectId } : {}),
             ...(agentId ? { agentId } : {}),
             baseBranch: sandboxRuntimeBaseBranch || "master",
@@ -319,9 +319,9 @@ export function buildSandboxTemplateStartCreateInput(
   };
 }
 
-function sandboxRuntimeSourceFromManifest(
+function sandboxWorkloadSourceFromManifest(
   manifest: SandboxTemplateManifest
-): SandboxCreateInput["runtime"] | undefined {
+): SandboxCreateInput["workloadSource"] | undefined {
   if (manifest.runtime.image) {
     return { image: manifest.runtime.image };
   }

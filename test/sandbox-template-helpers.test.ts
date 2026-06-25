@@ -95,7 +95,7 @@ describe("sandbox template helpers", () => {
     ).toThrow();
   });
 
-  test("validates Docker image and Dockerfile runtime sources", () => {
+  test("validates Docker image and Dockerfile workload sources", () => {
     const base = {
       schemaVersion: 1,
       name: "docker-runtime-template",

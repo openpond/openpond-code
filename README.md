@@ -89,6 +89,12 @@ Command reference:
 - `openpond apps positions tx [--method <GET|POST>] [--body <json>] [--params <json>]`: read or submit positions.
 - `openpond opentool <init|validate|build> [args]`: run OpenTool CLI commands via `npx opentool`.
 
+Agent source/edit status:
+
+- `openpond agent edit check-status <workItemId> --team-id <id> [--limit <n>] [--json]`: return the compact source-check status for an agent edit work item.
+- `openpond agent source check-status <workItemId> --team-id <id> [--limit <n>] [--json]`: alias for the same work-item status projection under the source command group.
+- The machine-readable status contract is documented in [`docs/agent-edit-check-status-json.md`](docs/agent-edit-check-status-json.md).
+
 ## TypeScript package
 
 Programmatic API that mirrors the CLI command surface:

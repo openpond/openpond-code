@@ -20,15 +20,15 @@ import {
 } from "../cache";
 import { loadConfig, saveGlobalConfig, type LocalConfig } from "../config";
 import type { OpenPondSandboxClient } from "../sandbox/client";
-import { SANDBOX_RUNTIME_ENVIRONMENT_IDS } from "../sandbox/types/index";
+import { SANDBOX_RUNTIME_PROFILE_IDS } from "../sandbox/types/index";
 import type {
   SandboxCreateInput,
   SandboxEnvVarInput,
   SandboxRecord,
   SandboxRuntime,
   SandboxRuntimeCreateInput,
-  SandboxRuntimeEnvironmentId,
-  SandboxRuntimeMode,
+  SandboxRuntimeProfileId,
+  SandboxWorkflowMode,
   SandboxRuntimePromotionPolicy,
   SandboxSecretMetadata,
 } from "../sandbox/types/index";
@@ -43,7 +43,7 @@ export const DEFAULT_OPENPOND_API_HOST = new URL(DEFAULT_OPENPOND_API_BASE_URL)
   .hostname;
 export const DEFAULT_OPENPOND_WEB_HOST = new URL(DEFAULT_OPENPOND_WEB_BASE_URL)
   .hostname;
-export const SANDBOX_RUNTIME_MODES: SandboxRuntimeMode[] = [
+export const SANDBOX_WORKFLOW_MODES: SandboxWorkflowMode[] = [
   "readonly",
   "attempt",
   "feature",
@@ -57,8 +57,8 @@ export const SANDBOX_RUNTIME_MODES: SandboxRuntimeMode[] = [
 ];
 export const SANDBOX_RUNTIME_PROMOTION_POLICIES: SandboxRuntimePromotionPolicy[] =
   ["none", "manual", "auto_after_checks"];
-export const SANDBOX_RUNTIME_ENVIRONMENTS: SandboxRuntimeEnvironmentId[] = [
-  ...SANDBOX_RUNTIME_ENVIRONMENT_IDS,
+export const SANDBOX_RUNTIME_PROFILES: SandboxRuntimeProfileId[] = [
+  ...SANDBOX_RUNTIME_PROFILE_IDS,
 ];
 
 export type Command =
@@ -72,6 +72,7 @@ export type Command =
   | "apps"
   | "repo"
   | "sandbox"
+  | "goal"
   | "project"
   | "agent"
   | "sandbox-template"
@@ -97,14 +98,24 @@ export type SandboxCreatePlanResult = {
 };
 
 export function getInstalledCliVersion(): string {
-  try {
-    const packageJsonPath = new URL("../../package.json", import.meta.url);
-    const raw = readFileSync(packageJsonPath, "utf-8");
-    const parsed = JSON.parse(raw) as { version?: unknown };
-    return typeof parsed.version === "string" ? parsed.version : "unknown";
-  } catch {
-    return "unknown";
+  const candidatePaths = [
+    "./package.json",
+    "../package.json",
+    "../../package.json",
+  ];
+  for (const candidatePath of candidatePaths) {
+    try {
+      const packageJsonPath = new URL(candidatePath, import.meta.url);
+      const raw = readFileSync(packageJsonPath, "utf-8");
+      const parsed = JSON.parse(raw) as { version?: unknown };
+      if (typeof parsed.version === "string") {
+        return parsed.version;
+      }
+    } catch {
+      // Keep looking; bundled CLIs may place package metadata beside the file.
+    }
   }
+  return "unknown";
 }
 
 export function parseSemver(version: string): [number, number, number] | null {
@@ -472,17 +483,17 @@ export function parseCsvOption(value: string | boolean | undefined): string[] {
     .filter(Boolean);
 }
 
-export function parseSandboxRuntimeModeOption(
+export function parseSandboxWorkflowModeOption(
   value: string | boolean | undefined
-): SandboxRuntimeMode | undefined {
+): SandboxWorkflowMode | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || !value.trim()) {
-    throw new Error("runtime-mode must be a non-empty value");
+    throw new Error("workflow-mode must be a non-empty value");
   }
-  const mode = value.trim() as SandboxRuntimeMode;
-  if (!SANDBOX_RUNTIME_MODES.includes(mode)) {
+  const mode = value.trim() as SandboxWorkflowMode;
+  if (!SANDBOX_WORKFLOW_MODES.includes(mode)) {
     throw new Error(
-      `runtime-mode must be one of ${SANDBOX_RUNTIME_MODES.join(", ")}`
+      `workflow-mode must be one of ${SANDBOX_WORKFLOW_MODES.join(", ")}`
     );
   }
   return mode;
@@ -506,20 +517,23 @@ export function parseSandboxRuntimePromotionPolicyOption(
   return policy;
 }
 
-export function parseSandboxRuntimeEnvironmentIdOption(
+export function parseSandboxRuntimeProfileIdOption(
   value: string | boolean | undefined
-): SandboxRuntimeEnvironmentId | undefined {
+): SandboxRuntimeProfileId | undefined {
   if (typeof value !== "string" || !value.trim()) return undefined;
-  const environmentId = value.trim() as SandboxRuntimeEnvironmentId;
-  if (!SANDBOX_RUNTIME_ENVIRONMENTS.includes(environmentId)) {
+  const runtimeProfileId = value.trim() as SandboxRuntimeProfileId;
+  if (!SANDBOX_RUNTIME_PROFILES.includes(runtimeProfileId)) {
     throw new Error(
-      `runtime-environment-id must be one of ${SANDBOX_RUNTIME_ENVIRONMENTS.join(
+      `runtime-profile-id must be one of ${SANDBOX_RUNTIME_PROFILES.join(
         ", "
       )}`
     );
   }
-  return environmentId;
+  return runtimeProfileId;
 }
+
+export const parseSandboxRuntimeEnvironmentIdOption =
+  parseSandboxRuntimeProfileIdOption;
 
 export function parseSandboxEnvOptions(
   options: Record<string, string | boolean>

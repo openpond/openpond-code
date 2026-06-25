@@ -1,6 +1,6 @@
 import type {
   SandboxRecord,
-  SandboxRuntimeMode,
+  SandboxWorkflowMode,
   SandboxRuntimePromotionPolicy,
 } from "./index";
 export type OpenPondOrganizationRole = "owner" | "admin" | "member";
@@ -104,6 +104,31 @@ export type SandboxAgentRunStatus =
   | "succeeded"
   | "failed"
   | "cancelled";
+export type SandboxAgentSourceCheckKind =
+  | "validate"
+  | "eval"
+  | "publish_review"
+  | "all";
+export type SandboxAgentSourceProjectionStatus =
+  | "missing_manifest"
+  | "manifest_error"
+  | "stale"
+  | "needs_validation"
+  | "ready";
+export type SandboxAgentSourceProjectionReason =
+  | "project_manifest_missing"
+  | "project_manifest_hash_missing"
+  | "project_action_registry_missing"
+  | "project_manifest_error"
+  | "source_ref_missing"
+  | "source_commit_sha_missing"
+  | "manifest_synced_at_missing"
+  | "build_status_missing"
+  | "build_status_not_passing"
+  | "validation_status_missing"
+  | "validation_status_not_passing"
+  | "active_manifest_source_sha_mismatch"
+  | "active_manifest_hash_mismatch";
 export type SandboxAgentRuntimeSourceMode =
   | "latest_source"
   | "published_snapshot"
@@ -196,7 +221,7 @@ export type SandboxAgent = {
   triggerType: SandboxAgentTriggerType;
   endpointPolicy: Record<string, unknown>;
   backgroundTaskPolicy: Record<string, unknown>;
-  defaultRuntimeMode: SandboxRuntimeMode;
+  defaultWorkflowMode: SandboxWorkflowMode;
   defaultBranch: string | null;
   sourceRefOverride: string | null;
   defaultPromotionPolicy: SandboxRuntimePromotionPolicy;
@@ -232,6 +257,284 @@ export type SandboxAgentRun = {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+};
+
+export type SandboxAgentManifestSnapshotProjection = {
+  id: string | null;
+  source: "agent_metadata" | "project_manifest";
+  sourceRef: string | null;
+  sourceCommitSha: string | null;
+  manifestHash: string | null;
+  manifestPath: string | null;
+  manifestSyncedAt: string | null;
+  buildStatus: string | null;
+  validationStatus: string | null;
+  evalStatus: string | null;
+  publishedAt: string | null;
+};
+
+export type SandboxAgentManifestSnapshot = {
+  id: string;
+  teamId: string;
+  projectId: string;
+  agentId: string;
+  sourceRef: string | null;
+  sourceCommitSha: string | null;
+  manifestHash: string;
+  manifestPath: string | null;
+  manifestSyncedAt: string | null;
+  manifestJson: Record<string, unknown>;
+  actionRegistryJson: Record<string, unknown> | null;
+  inspectJson: Record<string, unknown> | null;
+  buildStatus: string | null;
+  validationStatus: string | null;
+  evalStatus: string | null;
+  workItemId: string | null;
+  taskRunId: string | null;
+  traceArtifactRef: string | null;
+  evalResultArtifactRef: string | null;
+  publishedAt: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type SandboxAgentSourceActionProjection = {
+  name: string;
+  command: string | null;
+  description: string | null;
+  visibility: string | null;
+  timeoutSeconds: number | null;
+  artifactPaths: string[];
+};
+
+export type SandboxAgentSourceChannelProjection = {
+  id: string;
+  targetAction: string | null;
+  requiredConnections: string[];
+  capabilities: string[];
+  enabledByDefault: boolean;
+};
+
+export type SandboxAgentSourceIntegrationProjection = {
+  provider: string;
+  required: boolean;
+  capabilities: string[];
+  scopes: string[];
+  models: string[];
+};
+
+export type SandboxAgentSourceVolumeProjection = {
+  name: string;
+  mountPath: string | null;
+  storageGb: number | null;
+  required: boolean;
+  provisioningMode: string | null;
+  stateEngine: string | null;
+  uiLabel: string | null;
+  uiDescription: string | null;
+  allowUpload: boolean;
+};
+
+export type SandboxAgentSourceScheduleProjection = {
+  name: string;
+  action: string | null;
+  cron: string | null;
+  timezone: string | null;
+  enabled: boolean;
+  enabledByDefault: boolean;
+};
+
+export type SandboxAgentSourceEditableProjection = {
+  enabled: boolean;
+  requiredChecks: string[];
+  defaultResultMode: string | null;
+  supportedResultModes: string[];
+};
+
+export type SandboxAgentSourceDeployPlanSource = {
+  sourceRef: string | null;
+  sourceCommitSha: string | null;
+  manifestHash: string | null;
+  manifestPath: string | null;
+  manifestSyncedAt: string | null;
+  activeSnapshotId: string | null;
+  activeSnapshotSourceSha: string | null;
+};
+
+export type SandboxAgentSourceDeployPlanChecks = {
+  setupCommands: string[];
+  validationCommands: string[];
+  requiredChecks: string[];
+  evalNames: string[];
+};
+
+export type SandboxAgentSourceDeployPlan = {
+  projectId: string;
+  agentId: string;
+  status: SandboxAgentSourceProjectionStatus;
+  canRun: boolean;
+  canDeploy: boolean;
+  blockedReasons: SandboxAgentSourceProjectionReason[];
+  staleReasons: SandboxAgentSourceProjectionReason[];
+  source: SandboxAgentSourceDeployPlanSource;
+  defaultEntrypoint: SandboxAgentSelectedEntrypoint;
+  checks: SandboxAgentSourceDeployPlanChecks;
+  actions: SandboxAgentSourceActionProjection[];
+  channels: SandboxAgentSourceChannelProjection[];
+  requiredIntegrations: SandboxAgentSourceIntegrationProjection[];
+  optionalIntegrations: SandboxAgentSourceIntegrationProjection[];
+  envRefs: string[];
+  requiredVolumes: SandboxAgentSourceVolumeProjection[];
+  optionalVolumes: SandboxAgentSourceVolumeProjection[];
+  schedules: SandboxAgentSourceScheduleProjection[];
+  artifactPaths: string[];
+  editable: SandboxAgentSourceEditableProjection | null;
+};
+
+export type SandboxAgentSourceChecksRequestInput = {
+  teamId: string;
+  sourceRef?: string | null;
+  baseSha?: string | null;
+  checkKind?: SandboxAgentSourceCheckKind;
+  metadata?: Record<string, unknown>;
+};
+
+export type SandboxCodingWorkItem = Record<string, unknown> & {
+  id: string;
+};
+
+export type SandboxCodingWorkItemActivity = Record<string, unknown> & {
+  id: string;
+};
+
+export type SandboxCodingWorkItemMessage = Record<string, unknown> & {
+  id: string;
+};
+
+export type SandboxCodingWorkItemArtifact = Record<string, unknown> & {
+  id: string;
+  ref?: string | null;
+  kind?: string | null;
+};
+
+export type SandboxAgentEditWorkItemOpenInput = {
+  teamId: string;
+  projectId: string;
+  initialMessage?: string | null;
+  sourceRef?: string | null;
+  baseSha?: string | null;
+};
+
+export type SandboxAgentEditWorkItemOpenResult = {
+  workItem: SandboxCodingWorkItem;
+  created: boolean;
+  detail?: Record<string, unknown>;
+};
+
+export type SandboxCodingWorkItemChatInput = {
+  teamId: string;
+  message: string;
+  mode?: "sync_cloud" | "queue_cloud";
+  sourceRef?: string | null;
+  baseSha?: string | null;
+  payload?: Record<string, unknown>;
+};
+
+export type SandboxCodingWorkItemChatResult = Record<string, unknown> & {
+  userMessage?: SandboxCodingWorkItemMessage;
+  assistantMessage?: SandboxCodingWorkItemMessage;
+  activity?: SandboxCodingWorkItemActivity;
+};
+
+export type SandboxCodingWorkItemBackgroundInput = {
+  teamId: string;
+  prompt?: string | null;
+  sourceRef?: string | null;
+  baseSha?: string | null;
+  sourceRuntimeId?: string | null;
+  sourceSandboxId?: string | null;
+  agentId?: string | null;
+  agentEdit?: Record<string, unknown> | null;
+  setup?: { commands: string[] } | null;
+  validation?: { commands: string[] } | null;
+  branchPolicy?: Record<string, unknown> | null;
+  payload?: Record<string, unknown>;
+};
+
+export type SandboxCodingWorkItemBackgroundResult = Record<string, unknown> & {
+  workItem?: SandboxCodingWorkItem;
+  activity?: SandboxCodingWorkItemActivity;
+};
+
+export type SandboxCodingWorkItemSourceCheckStatus = Record<string, unknown> & {
+  workItemId: string;
+  workItemStatus?: string | null;
+  latestTaskRunId?: string | null;
+  latestRuntimeId?: string | null;
+  latestSandboxId?: string | null;
+  sourceMaterialization?: Record<string, unknown> | null;
+  setup?: Record<string, unknown> | null;
+  policyDiscovery?: Record<string, unknown> | null;
+  discoveredRequiredChecks?: string[];
+  checkRuns?: Array<Record<string, unknown>>;
+  validation?: Record<string, unknown> | null;
+  eval?: Record<string, unknown> | null;
+  requestedCheckKind?: string | null;
+  deployPlan?: Record<string, unknown> | null;
+  traceArtifactRefs?: string[];
+  evalResultArtifactRefs?: string[];
+  validatorArtifactRefs?: string[];
+  patchArtifactRef?: string | null;
+  draftSourceRef?: string | null;
+  finalResultState?: string | null;
+  publishBlockers?: string[];
+};
+
+export type SandboxCodingWorkItemStatusResult = {
+  workItem: SandboxCodingWorkItem;
+  activity: SandboxCodingWorkItemActivity[];
+  sourceCheckStatus: SandboxCodingWorkItemSourceCheckStatus;
+};
+
+export type SandboxCodingWorkItemPromotionInput = {
+  teamId: string;
+  ref: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type SandboxCodingWorkItemActivityListInput = {
+  teamId: string;
+  limit?: number;
+};
+
+export type SandboxCodingWorkItemGetInput = {
+  teamId: string;
+  includeArchived?: boolean;
+};
+
+export type SandboxAgentSourceChecksRequestResult = {
+  workItem: SandboxCodingWorkItem;
+  createdEditWorkItem: boolean;
+  activity: SandboxCodingWorkItemActivity;
+  deployPlan: SandboxAgentSourceDeployPlan | null;
+};
+
+export type SandboxAgentSourcePublishInput = {
+  teamId: string;
+  expectedManifestHash?: string | null;
+  expectedSourceCommitSha?: string | null;
+  evalStatus?: string | null;
+  workItemId?: string | null;
+  taskRunId?: string | null;
+  traceArtifactRef?: string | null;
+  evalResultArtifactRef?: string | null;
+};
+
+export type SandboxAgentSourcePublishResult = {
+  agent: SandboxAgent;
+  projection: Record<string, unknown>;
+  activeManifestSnapshot: SandboxAgentManifestSnapshotProjection;
+  publishedAt: string;
 };
 
 export type SandboxProjectUpsertInput = {
@@ -300,7 +603,7 @@ export type SandboxAgentUpsertInput = {
   triggerType?: SandboxAgentTriggerType;
   endpointPolicy?: Record<string, unknown>;
   backgroundTaskPolicy?: Record<string, unknown>;
-  defaultRuntimeMode?: SandboxRuntimeMode;
+  defaultWorkflowMode?: SandboxWorkflowMode;
   defaultBranch?: string | null;
   sourceRefOverride?: string | null;
   defaultPromotionPolicy?: SandboxRuntimePromotionPolicy;
@@ -325,7 +628,7 @@ export type SandboxAgentRunInput = {
   triggerType?: SandboxAgentTriggerType;
   input?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
-  runtimeMode?: SandboxRuntimeMode;
+  workflowMode?: SandboxWorkflowMode;
   runtimeSourcePolicy?: SandboxAgentRuntimeSourcePolicy;
 };
 
@@ -337,4 +640,10 @@ export type SandboxAgentRunResponse = {
   agent: SandboxAgent;
   run: SandboxAgentRun;
   sandbox?: SandboxRecord | null;
+};
+export type SandboxAgentSourceDeployPlanResponse = {
+  deployPlan: SandboxAgentSourceDeployPlan;
+};
+export type SandboxAgentManifestSnapshotsResponse = {
+  manifestSnapshots: SandboxAgentManifestSnapshot[];
 };

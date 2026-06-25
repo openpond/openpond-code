@@ -5,6 +5,7 @@ import {
   createSandboxNamespace,
   createSandboxProjectNamespace,
   createSandboxRuntimeNamespace,
+  createSandboxWorkItemNamespace,
 } from "./client-handles";
 import { createSandboxRuntimeHandle } from "./runtime-handle";
 import { runSandboxSmoke } from "./smoke";
@@ -67,6 +68,27 @@ import type {
   SandboxAgentUpsertInput,
   SandboxAgentUpdateInput,
   SandboxAgentRunInput,
+  SandboxAgentSourceChecksRequestInput,
+  SandboxAgentSourceChecksRequestResult,
+  SandboxAgentSourceDeployPlan,
+  SandboxAgentSourceDeployPlanResponse,
+  SandboxAgentSourcePublishInput,
+  SandboxAgentSourcePublishResult,
+  SandboxAgentEditWorkItemOpenInput,
+  SandboxAgentEditWorkItemOpenResult,
+  SandboxCodingWorkItem,
+  SandboxCodingWorkItemActivity,
+  SandboxCodingWorkItemActivityListInput,
+  SandboxCodingWorkItemArtifact,
+  SandboxCodingWorkItemBackgroundInput,
+  SandboxCodingWorkItemBackgroundResult,
+  SandboxCodingWorkItemChatInput,
+  SandboxCodingWorkItemChatResult,
+  SandboxCodingWorkItemGetInput,
+  SandboxCodingWorkItemPromotionInput,
+  SandboxCodingWorkItemStatusResult,
+  SandboxAgentManifestSnapshot,
+  SandboxAgentManifestSnapshotsResponse,
   SandboxProjectListResponse,
   SandboxProjectResponse,
   SandboxAgentListResponse,
@@ -192,6 +214,7 @@ export class OpenPondSandboxClient {
   readonly sandboxes = createSandboxNamespace(this);
   readonly projects = createSandboxProjectNamespace(this);
   readonly agents = createSandboxAgentNamespace(this);
+  readonly workItems = createSandboxWorkItemNamespace(this);
 
   list(
     input: {
@@ -508,6 +531,158 @@ export class OpenPondSandboxClient {
         body: JSON.stringify(input),
       }
     );
+  }
+
+  getAgentSourceDeployPlan(
+    agentId: string,
+    input: { teamId: string }
+  ): Promise<SandboxAgentSourceDeployPlan> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    return this.requestApiRoot<SandboxAgentSourceDeployPlanResponse>(
+      `/agents/${encodeURIComponent(
+        agentId
+      )}/source/deploy-plan?${query.toString()}`
+    ).then((payload) => payload.deployPlan);
+  }
+
+  listAgentManifestSnapshots(
+    agentId: string,
+    input: { teamId: string; limit?: number }
+  ): Promise<SandboxAgentManifestSnapshot[]> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    return this.requestApiRoot<SandboxAgentManifestSnapshotsResponse>(
+      `/agents/${encodeURIComponent(
+        agentId
+      )}/source/manifest-snapshots?${query.toString()}`
+    ).then((payload) => payload.manifestSnapshots);
+  }
+
+  requestAgentSourceChecks(
+    agentId: string,
+    input: SandboxAgentSourceChecksRequestInput
+  ): Promise<SandboxAgentSourceChecksRequestResult> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    const { teamId: _teamId, ...body } = input;
+    return this.requestApiRoot<SandboxAgentSourceChecksRequestResult>(
+      `/agents/${encodeURIComponent(
+        agentId
+      )}/source/checks?${query.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    );
+  }
+
+  publishAgentSource(
+    agentId: string,
+    input: SandboxAgentSourcePublishInput
+  ): Promise<SandboxAgentSourcePublishResult> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    const { teamId: _teamId, ...body } = input;
+    return this.requestApiRoot<SandboxAgentSourcePublishResult>(
+      `/agents/${encodeURIComponent(
+        agentId
+      )}/source/publish?${query.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    );
+  }
+
+  openAgentEditWorkItem(
+    agentId: string,
+    input: SandboxAgentEditWorkItemOpenInput
+  ): Promise<SandboxAgentEditWorkItemOpenResult> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    const { teamId: _teamId, ...body } = input;
+    return this.requestApiRoot<SandboxAgentEditWorkItemOpenResult>(
+      `/agents/${encodeURIComponent(
+        agentId
+      )}/edit-work-item?${query.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    );
+  }
+
+  getCodingWorkItem(
+    workItemId: string,
+    input: SandboxCodingWorkItemGetInput
+  ): Promise<SandboxCodingWorkItem> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    if (input.includeArchived) query.set("includeArchived", "true");
+    return this.requestApiRoot<{ workItem: SandboxCodingWorkItem }>(
+      `/work-items/${encodeURIComponent(workItemId)}?${query.toString()}`
+    ).then((payload) => payload.workItem);
+  }
+
+  sendCodingWorkItemChat(
+    workItemId: string,
+    input: SandboxCodingWorkItemChatInput
+  ): Promise<SandboxCodingWorkItemChatResult> {
+    return this.requestApiRoot<SandboxCodingWorkItemChatResult>(
+      `/work-items/${encodeURIComponent(workItemId)}/chat`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    );
+  }
+
+  listCodingWorkItemActivity(
+    workItemId: string,
+    input: SandboxCodingWorkItemActivityListInput
+  ): Promise<SandboxCodingWorkItemActivity[]> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    return this.requestApiRoot<{ activity: SandboxCodingWorkItemActivity[] }>(
+      `/work-items/${encodeURIComponent(
+        workItemId
+      )}/activity?${query.toString()}`
+    ).then((payload) => payload.activity);
+  }
+
+  getCodingWorkItemStatus(
+    workItemId: string,
+    input: SandboxCodingWorkItemActivityListInput & { includeArchived?: boolean }
+  ): Promise<SandboxCodingWorkItemStatusResult> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    if (input.includeArchived) query.set("includeArchived", "true");
+    return this.requestApiRoot<SandboxCodingWorkItemStatusResult>(
+      `/work-items/${encodeURIComponent(workItemId)}/status?${query.toString()}`
+    );
+  }
+
+  handleCodingWorkItemInBackground(
+    workItemId: string,
+    input: SandboxCodingWorkItemBackgroundInput
+  ): Promise<SandboxCodingWorkItemBackgroundResult> {
+    return this.requestApiRoot<SandboxCodingWorkItemBackgroundResult>(
+      `/work-items/${encodeURIComponent(workItemId)}/handle-background`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    );
+  }
+
+  promoteCodingWorkItemResult(
+    workItemId: string,
+    action: "checkpoint" | "commit" | "pr",
+    input: SandboxCodingWorkItemPromotionInput
+  ): Promise<SandboxCodingWorkItemArtifact> {
+    return this.requestApiRoot<{ artifact: SandboxCodingWorkItemArtifact }>(
+      `/work-items/${encodeURIComponent(workItemId)}/result/${action}`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    ).then((payload) => payload.artifact);
   }
 
   getMicrosoftTeamsBotOverview(input: {

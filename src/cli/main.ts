@@ -42,6 +42,7 @@ import {
   runToolRun,
 } from "./core-commands";
 import { printHelp } from "./help";
+import { runGoalCommand } from "../goal/cli";
 import { runOpChatCommand } from "./opchat";
 import { runOrganizationsCommand } from "./organizations";
 import { runAgentCommand, runProjectCommand } from "./project-agent";
@@ -234,6 +235,11 @@ async function main() {
 
   if (command === "agent") {
     await runAgentCommand(options, rest);
+    return;
+  }
+
+  if (command === "goal") {
+    await runGoalCommand(options, rest);
     return;
   }
 

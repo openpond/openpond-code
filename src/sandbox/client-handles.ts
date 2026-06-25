@@ -1,8 +1,16 @@
 import type { OpenPondSandboxClient } from "./client";
 import type {
   SandboxAgentRunInput,
+  SandboxAgentEditWorkItemOpenInput,
+  SandboxAgentSourceChecksRequestInput,
+  SandboxAgentSourcePublishInput,
   SandboxAgentUpdateInput,
   SandboxAgentUpsertInput,
+  SandboxCodingWorkItemActivityListInput,
+  SandboxCodingWorkItemBackgroundInput,
+  SandboxCodingWorkItemChatInput,
+  SandboxCodingWorkItemGetInput,
+  SandboxCodingWorkItemPromotionInput,
   SandboxCreateInput,
   SandboxAsyncRequestOptions,
   SandboxProjectUpdateInput,
@@ -120,5 +128,56 @@ export function createSandboxAgentNamespace(client: OpenPondSandboxClient) {
       client.archiveAgent(agentId, input),
     run: (agentId: string, input: SandboxAgentRunInput) =>
       client.runAgent(agentId, input),
+    sourceDeployPlan: (agentId: string, input: { teamId: string }) =>
+      client.getAgentSourceDeployPlan(agentId, input),
+    manifestSnapshots: (
+      agentId: string,
+      input: { teamId: string; limit?: number }
+    ) => client.listAgentManifestSnapshots(agentId, input),
+    requestSourceChecks: (
+      agentId: string,
+      input: SandboxAgentSourceChecksRequestInput
+    ) => client.requestAgentSourceChecks(agentId, input),
+    publishSource: (agentId: string, input: SandboxAgentSourcePublishInput) =>
+      client.publishAgentSource(agentId, input),
+    openEditWorkItem: (
+      agentId: string,
+      input: SandboxAgentEditWorkItemOpenInput
+    ) => client.openAgentEditWorkItem(agentId, input),
+  };
+}
+
+export function createSandboxWorkItemNamespace(client: OpenPondSandboxClient) {
+  return {
+    get: (workItemId: string, input: SandboxCodingWorkItemGetInput) =>
+      client.getCodingWorkItem(workItemId, input),
+    chat: (workItemId: string, input: SandboxCodingWorkItemChatInput) =>
+      client.sendCodingWorkItemChat(workItemId, input),
+    activity: (
+      workItemId: string,
+      input: SandboxCodingWorkItemActivityListInput
+    ) => client.listCodingWorkItemActivity(workItemId, input),
+    status: (
+      workItemId: string,
+      input: SandboxCodingWorkItemActivityListInput & {
+        includeArchived?: boolean;
+      }
+    ) => client.getCodingWorkItemStatus(workItemId, input),
+    handleBackground: (
+      workItemId: string,
+      input: SandboxCodingWorkItemBackgroundInput
+    ) => client.handleCodingWorkItemInBackground(workItemId, input),
+    promoteCheckpoint: (
+      workItemId: string,
+      input: SandboxCodingWorkItemPromotionInput
+    ) => client.promoteCodingWorkItemResult(workItemId, "checkpoint", input),
+    promoteCommit: (
+      workItemId: string,
+      input: SandboxCodingWorkItemPromotionInput
+    ) => client.promoteCodingWorkItemResult(workItemId, "commit", input),
+    promotePullRequest: (
+      workItemId: string,
+      input: SandboxCodingWorkItemPromotionInput
+    ) => client.promoteCodingWorkItemResult(workItemId, "pr", input),
   };
 }

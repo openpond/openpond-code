@@ -129,12 +129,30 @@ export type SandboxRuntimeSourceInput = {
   dockerfile?: SandboxRuntimeDockerfileSourceInput;
 };
 
+export type SandboxSourceArchiveEntry = {
+  path: string;
+  type: "directory" | "file";
+  contentsBase64?: string;
+};
+
+export type SandboxCreateSourceArchive = {
+  source?: "internal_project" | "template_repo" | "client_upload";
+  ref?: string;
+  commitSha?: string | null;
+  archive: {
+    version: 1;
+    createdAt: string;
+    entries: SandboxSourceArchiveEntry[];
+    tarBase64?: string;
+  };
+};
+
 export type SandboxCreateInput = {
   repo?: string;
   teamId?: string;
   projectId?: string;
   agentId?: string;
-  runtimeEnvironmentId?: import("./runtime-environments.js").SandboxRuntimeEnvironmentId;
+  runtimeProfileId?: import("./runtime-profiles.js").SandboxRuntimeProfileId;
   command?: string;
   visibility?: "private" | "team";
   resources?: Partial<SandboxResources>;
@@ -145,7 +163,8 @@ export type SandboxCreateInput = {
   volumes?: SandboxVolumeProvisionInput[];
   integrationLeases?: SandboxIntegrationLeaseInput[];
   integrationConnectionLeases?: SandboxIntegrationConnectionLeaseInput[];
-  runtime?: SandboxRuntimeSourceInput;
+  workloadSource?: SandboxRuntimeSourceInput;
+  sourceArchive?: SandboxCreateSourceArchive;
   metadata?: Record<string, unknown>;
 };
 
