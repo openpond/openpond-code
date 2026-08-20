@@ -1,5 +1,11 @@
 # openpond-code
 
+## 0.6.0
+
+### Minor Changes
+
+- 229a2bc: agents,project
+
 ## 0.5.3
 
 ### Patch Changes
