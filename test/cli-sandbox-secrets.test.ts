@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { cp, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage } from "node:http";
 import os from "node:os";
@@ -18,6 +18,13 @@ const AGENT_SDK_PILOT_NAMES = [
   "water-estimator-agent",
   "integration-heavy-agent",
 ] as const;
+const TEST_AGENT_SDK_ROOT = path.resolve(
+  process.env.OPENPOND_AGENT_SDK_PATH ??
+    path.resolve(process.cwd(), "../openpond-agent-sdk")
+);
+const HAS_TEST_AGENT_SDK_SOURCE = existsSync(
+  path.join(TEST_AGENT_SDK_ROOT, "package.json")
+);
 
 type CapturedRequest = {
   method: string;
@@ -1651,7 +1658,9 @@ describe("sandbox secret CLI output redaction", () => {
     }
   });
 
-  test("project source-upload materializes pilots copied from a packed SDK install", async () => {
+  test.skipIf(!HAS_TEST_AGENT_SDK_SOURCE)(
+    "project source-upload materializes pilots copied from a packed SDK install",
+    async () => {
     const sdkRoot = resolveTestAgentSdkRoot();
     const workRoot = await mkdtemp(
       path.join(os.tmpdir(), "openpond-agent-sdk-packed-upload-")
@@ -1886,7 +1895,8 @@ describe("sandbox secret CLI output redaction", () => {
       expect(requests[5]?.body).toMatchObject({ triggerType: "background" });
       expect(requests[5]?.body).not.toHaveProperty("appId");
     });
-  });
+    }
+  );
 
   test("sandbox runtime inspection commands read runtime status and events", async () => {
     const requests: CapturedRequest[] = [];
@@ -4125,16 +4135,12 @@ async function runDependencySetupFromUploadMetadata(
 }
 
 function resolveTestAgentSdkRoot(): string {
-  const configured = process.env.OPENPOND_AGENT_SDK_PATH;
-  const candidate = configured
-    ? path.resolve(configured)
-    : path.resolve(process.cwd(), "../openpond-agent-sdk");
-  const packageJsonPath = path.join(candidate, "package.json");
+  const packageJsonPath = path.join(TEST_AGENT_SDK_ROOT, "package.json");
   const packageJson = JSON.parse(readFileSyncForTest(packageJsonPath)) as {
     name?: string;
   };
   expect(packageJson.name).toBe("openpond-agent-sdk");
-  return candidate;
+  return TEST_AGENT_SDK_ROOT;
 }
 
 async function rewriteAgentSdkDependencyForTest(
