@@ -191,6 +191,19 @@ export type SandboxGitDiff = {
   diff: string;
 };
 
+export type SandboxGitPatchExportInput = SandboxGitDiffInput;
+
+export type SandboxGitPatchExport = {
+  isRepo: boolean;
+  baseRef: string | null;
+  patch: string;
+  filename: string;
+  sha256: string;
+  bytes: number;
+  lineCount: number;
+  empty: boolean;
+};
+
 export type SandboxGitBranchInput = {
   branch: string;
   create?: boolean;

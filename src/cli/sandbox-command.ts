@@ -166,7 +166,12 @@ export async function runSandboxCommand(
     return;
   }
 
-  if (subcommand === "templates" || subcommand === "template-catalog") {
+  if (
+    subcommand === "published-snapshots" ||
+    subcommand === "published-snapshot-catalog" ||
+    subcommand === "templates" ||
+    subcommand === "template-catalog"
+  ) {
     const teamId =
       typeof options.teamId === "string" ? options.teamId.trim() : "";
     const projectId =
@@ -189,7 +194,7 @@ export async function runSandboxCommand(
     const tag = typeof options.tag === "string" ? options.tag.trim() : "";
     const useCase =
       typeof options.useCase === "string" ? options.useCase.trim() : "";
-    const catalog = await client.templates({
+    const catalog = await client.publishedSnapshots({
       ...(teamId ? { teamId } : {}),
       ...(projectId ? { projectId } : {}),
       ...(query ? { q: query } : {}),
@@ -198,11 +203,11 @@ export async function runSandboxCommand(
       ...(tag ? { tag } : {}),
       ...(useCase ? { useCase } : {}),
     });
-    if (catalog.templates.length === 0) {
-      console.log("no sandbox templates found");
+    if (catalog.publishedSnapshots.length === 0) {
+      console.log("no published snapshots found");
       return;
     }
-    for (const template of catalog.templates) {
+    for (const template of catalog.publishedSnapshots) {
       console.log(formatSandboxTemplateLine(template));
     }
     return;
@@ -220,7 +225,12 @@ export async function runSandboxCommand(
     return;
   }
 
-  if (subcommand === "template-launch" || subcommand === "launch-template") {
+  if (
+    subcommand === "run-published-snapshot" ||
+    subcommand === "published-snapshot-run" ||
+    subcommand === "template-launch" ||
+    subcommand === "launch-template"
+  ) {
     const teamId =
       typeof options.teamId === "string" ? options.teamId.trim() : "";
     const projectId =
@@ -245,7 +255,7 @@ export async function runSandboxCommand(
       typeof options.useCase === "string" ? options.useCase.trim() : "";
     if (!snapshotId && !templateName && !useCase) {
       throw new Error(
-        "usage: sandbox template-launch [--snapshot-id <id>|--template-name <name>|--use-case <id>] [--version <v>]"
+        "usage: sandbox run-published-snapshot [--snapshot-id <id>|--name <name>|--use-case <id>] [--version <v>]"
       );
     }
     const budgetUsd =
@@ -254,7 +264,7 @@ export async function runSandboxCommand(
         : typeof options.budget === "string" && options.budget.trim()
         ? options.budget.trim()
         : "";
-    const result = await client.launchTemplate({
+    const result = await client.runPublishedSnapshot({
       ...(teamId ? { teamId } : {}),
       ...(projectId ? { projectId } : {}),
       ...(snapshotId ? { snapshotId } : {}),
@@ -263,7 +273,7 @@ export async function runSandboxCommand(
       ...(useCase ? { useCase } : {}),
       ...(budgetUsd ? { budget: { maxUsd: budgetUsd } } : {}),
       metadata: {
-        source: "openpond-code-template-launch",
+        source: "openpond-code-published-snapshot-run",
       },
     });
     console.log(JSON.stringify(result, null, 2));
@@ -473,9 +483,15 @@ export async function runSandboxCommand(
   if (subcommand === "stop") {
     const sandboxId = rest[1];
     if (!sandboxId) {
-      throw new Error("usage: sandbox stop <sandboxId>");
+      throw new Error(
+        "usage: sandbox stop <sandboxId> [--fail-on-unpreserved-changes]"
+      );
     }
-    const result = await client.stop(sandboxId);
+    const result = await client.stop(sandboxId, {
+      failOnUnpreservedChanges: parseBooleanOption(
+        options.failOnUnpreservedChanges
+      ),
+    });
     console.log(
       JSON.stringify(
         {
@@ -511,9 +527,15 @@ export async function runSandboxCommand(
   if (subcommand === "delete") {
     const sandboxId = rest[1];
     if (!sandboxId) {
-      throw new Error("usage: sandbox delete <sandboxId>");
+      throw new Error(
+        "usage: sandbox delete <sandboxId> [--fail-on-unpreserved-changes]"
+      );
     }
-    const sandbox = await client.delete(sandboxId);
+    const sandbox = await client.delete(sandboxId, {
+      failOnUnpreservedChanges: parseBooleanOption(
+        options.failOnUnpreservedChanges
+      ),
+    });
     console.log(
       JSON.stringify({ sandbox: summarizeSandbox(sandbox) }, null, 2)
     );
@@ -678,6 +700,6 @@ export async function runSandboxCommand(
   }
 
   throw new Error(
-    "usage: sandbox <list|mcp-config|runtime-list|runtime-get|runtime-events|runtime-status|runtime-event|pricing|costs|secrets|secret-create|secret-rotate|secret-attach|secret-revoke|secret-delete|snapshots|templates|template-launch|snapshot-fork|snapshot-validate|snapshot-publish|create|exec|port|preview|stop|start|delete|receipts|logs|billing|process-start|process-list|process-get|process-stop|process-stream|pty-start|pty-list|pty-get|pty-write|pty-stop|pty-stream|upload-file|download-file|list-files|search-files|delete-file|stat-file|mkdir|move-file|git-status|git-diff|git-branch|git-commit|git-pull|git-push|smoke> [args]"
+    "usage: sandbox <list|mcp-config|runtime-list|runtime-get|runtime-events|runtime-status|runtime-event|runtime-preserve-source|pricing|costs|secrets|secret-create|secret-rotate|secret-attach|secret-revoke|secret-delete|snapshots|published-snapshots|run-published-snapshot|snapshot-fork|snapshot-validate|snapshot-publish|create|exec|port|preview|stop|start|delete|receipts|logs|billing|process-start|process-list|process-get|process-stop|process-stream|pty-start|pty-list|pty-get|pty-write|pty-stop|pty-stream|upload-file|download-file|list-files|search-files|delete-file|stat-file|mkdir|move-file|git-status|git-diff|git-export-patch|git-branch|git-commit|git-pull|git-push|smoke> [args]"
   );
 }

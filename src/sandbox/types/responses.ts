@@ -12,6 +12,7 @@ import type {
   SandboxGitBranch,
   SandboxGitCommit,
   SandboxGitDiff,
+  SandboxGitPatchExport,
   SandboxGitRemoteOperation,
   SandboxGitStatus,
   SandboxIntegrationConnection,
@@ -123,6 +124,11 @@ export type SandboxTemplateLaunchResponse = SandboxForkResponse & {
   schedules?: SandboxScheduleRecord[];
 };
 
+export type SandboxPublishedSnapshotLaunchResponse =
+  SandboxTemplateLaunchResponse & {
+    publishedSnapshot: SandboxTemplateCatalogEntry;
+  };
+
 export type SandboxScheduleListResponse = {
   schedules: SandboxScheduleRecord[];
 };
@@ -228,14 +234,23 @@ export type SandboxTemplateBuildResponse = {
   build: SandboxTemplateBuildRecord;
 };
 
+export type SandboxPublishedSnapshotBuildResponse =
+  SandboxTemplateBuildResponse;
+
 export type SandboxTemplateBuildListResponse = {
   builds: SandboxTemplateBuildRecord[];
 };
+
+export type SandboxPublishedSnapshotBuildListResponse =
+  SandboxTemplateBuildListResponse;
 
 export type SandboxTemplateBuildLogsResponse = {
   buildId: string;
   logs: string[];
 };
+
+export type SandboxPublishedSnapshotBuildLogsResponse =
+  SandboxTemplateBuildLogsResponse;
 
 export type OpenPondOrganizationsResponse = {
   organizations: OpenPondOrganization[];
@@ -262,6 +277,12 @@ export type SandboxReceiptResponse = {
   receipt: SandboxReceipt;
 };
 
+export type SandboxLifecycleAcceptedResponse = {
+  accepted: true;
+  operation: "archive" | "delete" | "stop";
+  sandbox: SandboxRecord;
+};
+
 export type SandboxStartResponse = {
   sandbox: SandboxRecord;
 };
@@ -286,6 +307,11 @@ export type SandboxGitStatusResponse = {
 export type SandboxGitDiffResponse = {
   sandbox: SandboxRecord;
   diff: SandboxGitDiff;
+};
+
+export type SandboxGitPatchExportResponse = {
+  sandbox: SandboxRecord;
+  patch: SandboxGitPatchExport;
 };
 
 export type SandboxGitBranchResponse = {

@@ -1,3 +1,7 @@
+import { Buffer } from "node:buffer";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
+
 import type { OpenPondSandboxClient } from "../sandbox/client";
 import type {
   SandboxCreateInput,
@@ -17,11 +21,16 @@ import {
   parseJsonOption,
   parseNumberOption,
   parseSandboxEnvOptions,
-  parseSandboxRuntimeModeOption,
+  parseSandboxRuntimeProfileIdOption,
+  parseSandboxWorkflowModeOption,
   parseSandboxRuntimePromotionPolicyOption,
   type SandboxCreatePlan,
   type SandboxCreatePlanResult,
 } from "./common";
+
+const DOCKER_CONTEXT_MAX_FILES = 500;
+const DOCKER_CONTEXT_MAX_FILE_BYTES = 8 * 1024 * 1024;
+const DOCKER_CONTEXT_MAX_BYTES = 8 * 1024 * 1024;
 
 export async function createSandboxFromPlan(
   client: OpenPondSandboxClient,
@@ -138,7 +147,7 @@ export function formatSnapshotCatalogLine(snapshot: {
     snapshot.sandboxId,
     `storage=${snapshot.storage ?? "-"}`,
     `sizeGb=${snapshot.sizeGb ?? "-"}`,
-    `template=${template}`,
+    `publishedSnapshot=${template}`,
     `replay=${replayState}`,
     `retention=${retention}`,
     `monthlyUsd=${monthlyUsd}`,
@@ -412,9 +421,14 @@ export function buildSandboxCreateInput(
     );
   }
   const agentId = requestedAgentId || sandboxRuntimeAgentId;
-  const sandboxRuntimeMode = parseSandboxRuntimeModeOption(options.runtimeMode);
+  const sandboxWorkflowMode = parseSandboxWorkflowModeOption(options.workflowMode);
   const sandboxRuntimePromotionPolicy =
     parseSandboxRuntimePromotionPolicyOption(options.runtimePromotionPolicy);
+  const workloadSource = buildSandboxWorkloadSourceInput(options);
+  const sourceArchive = buildDockerfileSourceArchiveInput(options);
+  const runtimeProfileId = parseSandboxRuntimeProfileIdOption(
+    options.runtimeProfileId
+  );
   const sandboxRuntimeBaseBranch =
     typeof options.runtimeBaseBranch === "string" &&
     options.runtimeBaseBranch.trim()
@@ -429,10 +443,11 @@ export function buildSandboxCreateInput(
       ? options.runtimeId.trim()
       : "";
   const sandboxRuntimeRequested = Boolean(
-    sandboxRuntimeMode ||
+    sandboxWorkflowMode ||
       sandboxRuntimePromotionPolicy ||
       sandboxRuntimeBaseBranch ||
       sandboxRuntimeBaseSha ||
+      runtimeProfileId ||
       runtimeId ||
       sandboxRuntimeProjectId ||
       sandboxRuntimeAgentId
@@ -450,7 +465,10 @@ export function buildSandboxCreateInput(
     ...(teamId ? { teamId } : {}),
     ...(projectId ? { projectId } : {}),
     ...(agentId ? { agentId } : {}),
+    ...(runtimeProfileId ? { runtimeProfileId } : {}),
     ...(command ? { command } : {}),
+    ...(workloadSource ? { workloadSource } : {}),
+    ...(sourceArchive ? { sourceArchive } : {}),
     resources: {
       ...(cpu !== undefined ? { cpu } : {}),
       ...(memoryGb !== undefined ? { memoryGb } : {}),
@@ -504,7 +522,7 @@ export function buildSandboxCreateInput(
       ? {
           sandboxRuntime: {
             ...(teamId ? { teamId } : {}),
-            ...(sandboxRuntimeMode ? { mode: sandboxRuntimeMode } : {}),
+            ...(sandboxWorkflowMode ? { workflowMode: sandboxWorkflowMode } : {}),
             ...(projectId ? { projectId } : {}),
             ...(agentId ? { agentId } : {}),
             baseBranch: sandboxRuntimeBaseBranch || "master",
@@ -514,10 +532,197 @@ export function buildSandboxCreateInput(
             ...(sandboxRuntimePromotionPolicy
               ? { promotionPolicy: sandboxRuntimePromotionPolicy }
               : {}),
+            ...(runtimeProfileId ? { runtimeProfileId } : {}),
           },
         }
       : {}),
   };
+}
+
+function isSafeDockerContextPath(filePath: string): boolean {
+  return (
+    filePath.length > 0 &&
+    !filePath.includes("\0") &&
+    !path.isAbsolute(filePath) &&
+    !filePath.split(/[\\/]+/).some((part) => !part || part === "." || part === "..")
+  );
+}
+
+function shouldSkipDockerContextPath(filePath: string): boolean {
+  return filePath.split(/[\\/]+/).some((segment) => {
+    const lower = segment.toLowerCase();
+    return (
+      lower === ".git" ||
+      lower === "node_modules" ||
+      lower === ".next" ||
+      lower === ".turbo" ||
+      lower.startsWith(".env")
+    );
+  });
+}
+
+function collectDockerContextFiles(params: {
+  contextRoot: string;
+  baseDir?: string;
+}): string[] {
+  const baseDir = params.baseDir ?? params.contextRoot;
+  const entries = readdirSync(baseDir, { withFileTypes: true });
+  const files: string[] = [];
+  for (const entry of entries) {
+    const absolutePath = path.join(baseDir, entry.name);
+    const relativePath = path
+      .relative(params.contextRoot, absolutePath)
+      .replace(/\\/g, "/");
+    if (
+      !relativePath ||
+      !isSafeDockerContextPath(relativePath) ||
+      shouldSkipDockerContextPath(relativePath)
+    ) {
+      continue;
+    }
+    if (entry.isDirectory()) {
+      files.push(
+        ...collectDockerContextFiles({
+          contextRoot: params.contextRoot,
+          baseDir: absolutePath,
+        })
+      );
+      continue;
+    }
+    if (entry.isFile()) {
+      files.push(relativePath);
+    }
+  }
+  return files;
+}
+
+function buildDockerfileSourceArchiveInput(
+  options: Record<string, string | boolean>
+): SandboxCreateInput["sourceArchive"] | undefined {
+  const dockerfilePath = stringOption(options.dockerfile);
+  if (!dockerfilePath) {
+    return undefined;
+  }
+  const contextPath = stringOption(options.dockerfileContext) || ".";
+  const contextRoot = path.resolve(process.cwd(), contextPath);
+  const contextStat = statSync(contextRoot);
+  if (!contextStat.isDirectory()) {
+    throw new Error(`dockerfile context must be a directory: ${contextPath}`);
+  }
+
+  const sourcePaths = collectDockerContextFiles({ contextRoot }).sort();
+  if (sourcePaths.length === 0) {
+    throw new Error(`dockerfile context has no files: ${contextPath}`);
+  }
+  if (sourcePaths.length > DOCKER_CONTEXT_MAX_FILES) {
+    throw new Error(
+      `dockerfile context has too many files: ${sourcePaths.length} > ${DOCKER_CONTEXT_MAX_FILES}`
+    );
+  }
+
+  let totalBytes = 0;
+  const entries = sourcePaths.map((sourcePath) => {
+    const absolutePath = path.resolve(contextRoot, sourcePath);
+    const relative = path.relative(contextRoot, absolutePath);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error(`dockerfile context path escapes context: ${sourcePath}`);
+    }
+    const stat = statSync(absolutePath);
+    if (stat.size > DOCKER_CONTEXT_MAX_FILE_BYTES) {
+      throw new Error(
+        `dockerfile context file is too large: ${sourcePath} (${stat.size} bytes)`
+      );
+    }
+    totalBytes += stat.size;
+    if (totalBytes > DOCKER_CONTEXT_MAX_BYTES) {
+      throw new Error(
+        `dockerfile context is too large: ${totalBytes} > ${DOCKER_CONTEXT_MAX_BYTES}`
+      );
+    }
+    return {
+      path: sourcePath,
+      type: "file" as const,
+      contentsBase64: Buffer.from(readFileSync(absolutePath)).toString("base64"),
+    };
+  });
+
+  return {
+    source: "client_upload",
+    ref: "client-upload",
+    archive: {
+      version: 1,
+      createdAt: new Date().toISOString(),
+      entries,
+    },
+  };
+}
+
+function buildSandboxWorkloadSourceInput(
+  options: Record<string, string | boolean>
+): SandboxCreateInput["workloadSource"] | undefined {
+  const imageRef = stringOption(options.image);
+  const dockerfilePath = stringOption(options.dockerfile);
+  if (imageRef && dockerfilePath) {
+    throw new Error("sandbox create accepts only one of --image or --dockerfile");
+  }
+  const workspaceRoot = stringOption(options.runtimeWorkspaceRoot);
+  if (imageRef) {
+    return {
+      image: {
+        ref: imageRef,
+        ...(stringOption(options.imageDigest)
+          ? { digest: stringOption(options.imageDigest) }
+          : {}),
+        ...(stringOption(options.registrySecretRef)
+          ? { registrySecretRef: stringOption(options.registrySecretRef) }
+          : {}),
+        ...(workspaceRoot ? { workspaceRoot } : {}),
+        platform: "linux/amd64",
+      },
+    };
+  }
+  if (dockerfilePath) {
+    const buildArgs = parseDockerBuildArgs(options.dockerBuildArgs);
+    const registrySecretRefs = parseCsvOption(options.dockerRegistrySecretRefs);
+    return {
+      dockerfile: {
+        path: dockerfilePath,
+        context: stringOption(options.dockerfileContext) || ".",
+        ...(stringOption(options.dockerfileTarget)
+          ? { target: stringOption(options.dockerfileTarget) }
+          : {}),
+        ...(Object.keys(buildArgs).length > 0 ? { buildArgs } : {}),
+        ...(registrySecretRefs.length > 0 ? { registrySecretRefs } : {}),
+        ...(workspaceRoot ? { workspaceRoot } : {}),
+        platform: "linux/amd64",
+      },
+    };
+  }
+  return undefined;
+}
+
+function parseDockerBuildArgs(
+  value: string | boolean | undefined
+): Record<string, string> {
+  if (typeof value !== "string" || !value.trim()) {
+    return {};
+  }
+  const parsed = parseJsonOption(value, "docker-build-args");
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("docker-build-args must be a JSON object");
+  }
+  const result: Record<string, string> = {};
+  for (const [key, rawValue] of Object.entries(parsed)) {
+    if (typeof rawValue !== "string") {
+      throw new Error("docker-build-args values must be strings");
+    }
+    result[key] = rawValue;
+  }
+  return result;
+}
+
+function stringOption(value: string | boolean | undefined): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 export function buildSandboxIntegrationAttachInput(
@@ -560,11 +765,11 @@ export function buildTemplateBuildCreateInput(
   const manifestPath =
     typeof options.manifestPath === "string" ? options.manifestPath.trim() : "";
   if (!teamId) {
-    throw new Error("template-build-create requires --team-id <id>");
+    throw new Error("published-snapshot-build-create requires --team-id <id>");
   }
   if (!sourceRepoUrl && !sourceProjectId) {
     throw new Error(
-      "template-build-create requires --source-repo-url <url> or --source-project-id <id>"
+      "published-snapshot-build-create requires --source-repo-url <url> or --source-project-id <id>"
     );
   }
   return {

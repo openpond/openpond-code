@@ -1,16 +1,47 @@
 import { randomUUID } from "node:crypto";
-import {
-  DEFAULT_OPENPOND_API_BASE_URL,
-  DEFAULT_OPENPOND_CHAT_API_BASE_URL,
-} from "./urls";
+import { DEFAULT_OPENPOND_OPCHAT_API_BASE_URL } from "./urls";
 
 export type HostedChatRole = "system" | "user" | "assistant" | "tool";
 
+export type HostedChatToolCall = {
+  id?: string;
+  type: "function" | string;
+  function?: {
+    name?: string;
+    arguments?: string;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+};
+
+export type HostedChatTool = {
+  type: "function" | string;
+  function?: {
+    name: string;
+    description?: string;
+    parameters?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+};
+
+export type HostedChatToolChoice =
+  | "none"
+  | "auto"
+  | "required"
+  | {
+      type: "function";
+      function: {
+        name: string;
+      };
+    };
+
 export type HostedChatMessage = {
   role: HostedChatRole;
-  content: string;
+  content?: string | null;
   name?: string;
   tool_call_id?: string;
+  tool_calls?: HostedChatToolCall[];
 };
 
 export type HostedModel = {
@@ -44,6 +75,7 @@ export type HostedChatCompletion = {
     message?: {
       role?: string;
       content?: string | null;
+      tool_calls?: HostedChatToolCall[];
     };
     finish_reason?: string | null;
   }>;
@@ -60,6 +92,11 @@ export type HostedChatStreamDelta =
   | {
       type: "reasoning_delta";
       text: string;
+      raw: unknown;
+    }
+  | {
+      type: "tool_call_delta";
+      toolCalls: HostedChatToolCall[];
       raw: unknown;
     }
   | {
@@ -82,6 +119,9 @@ export type HostedChatRequestOptions = {
   signal?: AbortSignal;
   temperature?: number;
   maxTokens?: number;
+  tools?: HostedChatTool[];
+  toolChoice?: HostedChatToolChoice;
+  tool_choice?: HostedChatToolChoice;
   metadata?: Record<string, unknown>;
 };
 
@@ -91,24 +131,44 @@ export type HostedModelsRequestOptions = {
   signal?: AbortSignal;
 };
 
+export type HostedModelRequestOptions = HostedModelsRequestOptions & {
+  model: string;
+};
+
 export type HostedChatApiBaseUrlOptions = {
   apiBaseUrl?: string | null;
   chatApiBaseUrl?: string | null;
+  opChatApiBaseUrl?: string | null;
   env?: Record<string, string | undefined>;
 };
 
 function normalizeApiBaseUrl(value: string): string {
-  const trimmed = value.trim().replace(/\/$/, "");
+  const trimmed = normalizeOptionalOpChatApiBaseUrl(value);
   if (!trimmed) throw new Error("apiBaseUrl is required");
   return trimmed;
 }
 
-function normalizeOptionalApiBaseUrl(value?: string | null): string | null {
-  const trimmed = value?.trim().replace(/\/$/, "");
-  return trimmed || null;
+function trimTrailingSlashes(value: string): string {
+  return value.replace(/\/+$/, "");
 }
 
-export function resolveHostedChatApiBaseUrl(
+function normalizeOptionalOpChatApiBaseUrl(value?: string | null): string | null {
+  let trimmed = trimTrailingSlashes(value?.trim() ?? "");
+  if (!trimmed) return null;
+
+  trimmed = trimmed
+    .replace(/\/chat\/completions$/i, "")
+    .replace(/\/models(?:\/[^/]+)?$/i, "");
+
+  if (trimmed.endsWith("/opchat/v1")) return trimmed;
+  if (trimmed.endsWith("/opchat")) return `${trimmed}/v1`;
+  if (trimmed.endsWith("/v1")) {
+    trimmed = trimmed.slice(0, -"/v1".length);
+  }
+  return `${trimTrailingSlashes(trimmed)}/opchat/v1`;
+}
+
+export function resolveOpChatApiBaseUrl(
   options: HostedChatApiBaseUrlOptions = {}
 ): string {
   const runtimeEnv =
@@ -117,19 +177,26 @@ export function resolveHostedChatApiBaseUrl(
       ? (process.env as Record<string, string | undefined>)
       : {});
   const explicit =
-    normalizeOptionalApiBaseUrl(options.chatApiBaseUrl) ??
-    normalizeOptionalApiBaseUrl(runtimeEnv.OPENPOND_CHAT_API_URL) ??
-    normalizeOptionalApiBaseUrl(runtimeEnv.OPENPOND_GATEWAY_URL);
+    normalizeOptionalOpChatApiBaseUrl(options.opChatApiBaseUrl) ??
+    normalizeOptionalOpChatApiBaseUrl(runtimeEnv.OPENPOND_OPCHAT_API_URL);
   if (explicit) return explicit;
 
-  const apiBase =
-    normalizeOptionalApiBaseUrl(options.apiBaseUrl) ??
-    normalizeOptionalApiBaseUrl(runtimeEnv.OPENPOND_API_URL) ??
-    DEFAULT_OPENPOND_API_BASE_URL;
+  const migrationInput =
+    normalizeOptionalOpChatApiBaseUrl(options.chatApiBaseUrl) ??
+    normalizeOptionalOpChatApiBaseUrl(runtimeEnv.OPENPOND_CHAT_API_URL) ??
+    normalizeOptionalOpChatApiBaseUrl(runtimeEnv.OPENPOND_GATEWAY_URL);
+  if (migrationInput) return migrationInput;
 
-  return apiBase === DEFAULT_OPENPOND_API_BASE_URL
-    ? DEFAULT_OPENPOND_CHAT_API_BASE_URL
-    : apiBase;
+  const apiBase =
+    normalizeOptionalOpChatApiBaseUrl(options.apiBaseUrl) ??
+    normalizeOptionalOpChatApiBaseUrl(runtimeEnv.OPENPOND_API_URL);
+  return apiBase ?? DEFAULT_OPENPOND_OPCHAT_API_BASE_URL;
+}
+
+export function resolveHostedChatApiBaseUrl(
+  options: HostedChatApiBaseUrlOptions = {}
+): string {
+  return resolveOpChatApiBaseUrl(options);
 }
 
 function requireToken(value: string): string {
@@ -156,11 +223,40 @@ async function readError(response: Response): Promise<string> {
   const text = await response.text().catch(() => "");
   if (!text) return response.statusText || `HTTP ${response.status}`;
   try {
-    const payload = JSON.parse(text) as { error?: unknown; message?: unknown };
-    const error = typeof payload.error === "string" ? payload.error : null;
+    const payload = JSON.parse(text) as {
+      error?: unknown;
+      message?: unknown;
+      code?: unknown;
+    };
+    const error =
+      typeof payload.error === "string"
+        ? payload.error
+        : payload.error &&
+          typeof payload.error === "object" &&
+          !Array.isArray(payload.error)
+        ? (payload.error as { code?: unknown; message?: unknown; type?: unknown })
+        : null;
+    const code =
+      typeof payload.code === "string"
+        ? payload.code
+        : error && typeof error !== "string" && typeof error.code === "string"
+        ? error.code
+        : null;
     const message =
-      typeof payload.message === "string" ? payload.message : null;
-    return [error, message].filter(Boolean).join(": ") || text;
+      typeof payload.message === "string"
+        ? payload.message
+        : error &&
+          typeof error !== "string" &&
+          typeof error.message === "string"
+        ? error.message
+        : null;
+    const label =
+      typeof error === "string"
+        ? error
+        : error && typeof error.type === "string"
+        ? error.type
+        : null;
+    return [code, label, message].filter(Boolean).join(": ") || text;
   } catch {
     return text;
   }
@@ -181,17 +277,24 @@ function buildHostedChatBody(
   if (typeof options.maxTokens === "number") {
     body.max_tokens = options.maxTokens;
   }
+  if (options.tools) {
+    body.tools = options.tools;
+  }
+  const toolChoice = options.toolChoice ?? options.tool_choice;
+  if (toolChoice !== undefined) {
+    body.tool_choice = toolChoice;
+  }
   if (options.metadata) {
     body.metadata = options.metadata;
   }
   return body;
 }
 
-export async function listHostedModels(
+export async function listOpChatModels(
   options: HostedModelsRequestOptions
 ): Promise<HostedModelsResponse> {
   const apiBaseUrl = normalizeApiBaseUrl(options.apiBaseUrl);
-  const response = await fetch(`${apiBaseUrl}/v1/models`, {
+  const response = await fetch(`${apiBaseUrl}/models`, {
     method: "GET",
     headers: hostedHeaders(options.token, "application/json"),
     signal: options.signal,
@@ -206,11 +309,35 @@ export async function listHostedModels(
   return (await response.json()) as HostedModelsResponse;
 }
 
+export async function getOpChatModel(
+  options: HostedModelRequestOptions
+): Promise<HostedModel> {
+  const apiBaseUrl = normalizeApiBaseUrl(options.apiBaseUrl);
+  const response = await fetch(
+    `${apiBaseUrl}/models/${encodeURIComponent(options.model)}`,
+    {
+      method: "GET",
+      headers: hostedHeaders(options.token, "application/json"),
+      signal: options.signal,
+    }
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Hosted model lookup failed: ${response.status} ${await readError(
+        response
+      )}`
+    );
+  }
+  return (await response.json()) as HostedModel;
+}
+
+export const listHostedModels = listOpChatModels;
+
 export async function sendHostedChatTurn(
   options: HostedChatRequestOptions
 ): Promise<HostedChatCompletion> {
   const apiBaseUrl = normalizeApiBaseUrl(options.apiBaseUrl);
-  const response = await fetch(`${apiBaseUrl}/v1/chat/completions`, {
+  const response = await fetch(`${apiBaseUrl}/chat/completions`, {
     method: "POST",
     headers: hostedHeaders(
       options.token,
@@ -233,6 +360,7 @@ type OpenAIStreamChunk = {
     delta?: {
       content?: string;
       reasoning_content?: string;
+      tool_calls?: HostedChatToolCall[];
     };
     finish_reason?: string | null;
   }>;
@@ -286,7 +414,7 @@ export async function* streamHostedChatTurn(
   options: HostedChatRequestOptions
 ): AsyncGenerator<HostedChatStreamDelta, void, unknown> {
   const apiBaseUrl = normalizeApiBaseUrl(options.apiBaseUrl);
-  const response = await fetch(`${apiBaseUrl}/v1/chat/completions`, {
+  const response = await fetch(`${apiBaseUrl}/chat/completions`, {
     method: "POST",
     headers: hostedHeaders(
       options.token,
@@ -322,8 +450,12 @@ export async function* streamHostedChatTurn(
     if (reasoning) {
       yield { type: "reasoning_delta", text: reasoning, raw };
     }
-    if (typeof choice.finish_reason !== "undefined") {
-      yield { type: "finish", finishReason: choice.finish_reason ?? null, raw };
+    const toolCalls = choice.delta?.tool_calls;
+    if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+      yield { type: "tool_call_delta", toolCalls, raw };
+    }
+    if (choice.finish_reason !== undefined && choice.finish_reason !== null) {
+      yield { type: "finish", finishReason: choice.finish_reason, raw };
     }
   }
 }

@@ -108,5 +108,46 @@ export async function handleSandboxRuntimeCommand(
     return true;
   }
 
+  if (
+    subcommand === "runtime-preserve-source" ||
+    subcommand === "runtime-preserve"
+  ) {
+    const runtimeId = rest[1]?.trim();
+    const teamId =
+      typeof options.teamId === "string" && options.teamId.trim()
+        ? options.teamId.trim()
+        : "";
+    const sandboxId =
+      typeof options.sandboxId === "string" && options.sandboxId.trim()
+        ? options.sandboxId.trim()
+        : "";
+    const message =
+      typeof options.message === "string" && options.message.trim()
+        ? options.message.trim()
+        : "";
+    if (!runtimeId) {
+      throw new Error(
+        "usage: sandbox runtime-preserve-source <runtimeId> [--team-id <id>] [--sandbox-id <id>] [--message <text>]"
+      );
+    }
+    console.log(
+      JSON.stringify(
+        await client.runtimes.preserveSource(
+          runtimeId,
+          {
+            ...(sandboxId ? { sandboxId } : {}),
+            ...(message ? { message } : {}),
+          },
+          {
+            ...(teamId ? { teamId } : {}),
+          }
+        ),
+        null,
+        2
+      )
+    );
+    return true;
+  }
+
   return false;
 }

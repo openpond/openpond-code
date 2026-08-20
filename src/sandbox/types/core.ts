@@ -106,11 +106,53 @@ export type SandboxIntegrationLeaseRef = {
   required: boolean;
 };
 
+export type SandboxRuntimeImageSourceInput = {
+  ref: string;
+  digest?: string;
+  registrySecretRef?: string;
+  platform?: "linux/amd64";
+  workspaceRoot?: string;
+};
+
+export type SandboxRuntimeDockerfileSourceInput = {
+  context?: string;
+  path?: string;
+  target?: string;
+  buildArgs?: Record<string, string>;
+  registrySecretRefs?: string[];
+  platform?: "linux/amd64";
+  workspaceRoot?: string;
+};
+
+export type SandboxRuntimeSourceInput = {
+  image?: SandboxRuntimeImageSourceInput;
+  dockerfile?: SandboxRuntimeDockerfileSourceInput;
+};
+
+export type SandboxSourceArchiveEntry = {
+  path: string;
+  type: "directory" | "file";
+  contentsBase64?: string;
+};
+
+export type SandboxCreateSourceArchive = {
+  source?: "internal_project" | "template_repo" | "client_upload";
+  ref?: string;
+  commitSha?: string | null;
+  archive: {
+    version: 1;
+    createdAt: string;
+    entries: SandboxSourceArchiveEntry[];
+    tarBase64?: string;
+  };
+};
+
 export type SandboxCreateInput = {
   repo?: string;
   teamId?: string;
   projectId?: string;
   agentId?: string;
+  runtimeProfileId?: import("./runtime-profiles.js").SandboxRuntimeProfileId;
   command?: string;
   visibility?: "private" | "team";
   resources?: Partial<SandboxResources>;
@@ -121,9 +163,15 @@ export type SandboxCreateInput = {
   volumes?: SandboxVolumeProvisionInput[];
   integrationLeases?: SandboxIntegrationLeaseInput[];
   integrationConnectionLeases?: SandboxIntegrationConnectionLeaseInput[];
+  workloadSource?: SandboxRuntimeSourceInput;
+  sourceArchive?: SandboxCreateSourceArchive;
   metadata?: Record<string, unknown>;
 };
 
-export type SandboxCreateOptions = {
+export type SandboxAsyncRequestOptions = {
   async?: boolean;
+  respondAsync?: boolean;
+  failOnUnpreservedChanges?: boolean;
 };
+
+export type SandboxCreateOptions = SandboxAsyncRequestOptions;

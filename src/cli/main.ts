@@ -42,10 +42,13 @@ import {
   runToolRun,
 } from "./core-commands";
 import { printHelp } from "./help";
+import { runGoalCommand } from "../goal/cli";
+import { runOpChatCommand } from "./opchat";
 import { runOrganizationsCommand } from "./organizations";
 import { runAgentCommand, runProjectCommand } from "./project-agent";
 import { runSandboxCommand } from "./sandbox-command";
 import { runSandboxTemplateCommand } from "./sandbox-template";
+import { runTeamsBotCommand } from "./teams-bot";
 
 async function main() {
   const { command, options, rest } = parseArgs(process.argv.slice(2));
@@ -235,8 +238,23 @@ async function main() {
     return;
   }
 
+  if (command === "goal") {
+    await runGoalCommand(options, rest);
+    return;
+  }
+
   if (command === "sandbox") {
     await runSandboxCommand(options, rest);
+    return;
+  }
+
+  if (command === "opchat") {
+    await runOpChatCommand(options, rest);
+    return;
+  }
+
+  if (command === "teams-bot") {
+    await runTeamsBotCommand(options, rest);
     return;
   }
 

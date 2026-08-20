@@ -184,6 +184,9 @@ export type SandboxTemplateCatalogEntry = {
   createdAt: string;
 };
 
+export type SandboxPublishedSnapshotCatalogEntry =
+  SandboxTemplateCatalogEntry;
+
 export type SandboxTemplateBuildStatus =
   | "queued"
   | "running"
@@ -231,3 +234,10 @@ export type SandboxTemplateBuildRecord = {
   createdAt: string | null;
   updatedAt: string | null;
 };
+
+export type SandboxPublishedSnapshotBuildStatus = SandboxTemplateBuildStatus;
+export type SandboxPublishedSnapshotBuildPublishStatus =
+  SandboxTemplateBuildPublishStatus;
+export type SandboxPublishedSnapshotBuildCreateInput =
+  SandboxTemplateBuildCreateInput;
+export type SandboxPublishedSnapshotBuildRecord = SandboxTemplateBuildRecord;

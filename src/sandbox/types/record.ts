@@ -11,6 +11,8 @@ import type {
   SandboxReservation,
   SandboxResources,
   SandboxRuntimeDriver,
+  SandboxRuntimeProfileId,
+  SandboxRuntimeProfileSummary,
   SandboxSnapshot,
   SandboxSnapshotCatalogEntry,
   SandboxSnapshotJob,
@@ -28,6 +30,10 @@ export type SandboxRecord = {
   projectId: string | null;
   agentId: string | null;
   runtimeId?: string | null;
+  runtimeProfileId?: SandboxRuntimeProfileId | null;
+  workspaceRoot?: string | null;
+  runtimeProfile?: SandboxRuntimeProfileSummary | null;
+  executionProfileId?: string | null;
   visibility: "private" | "team";
   ownerUserId: string;
   billingAccountId: string;
@@ -65,3 +71,8 @@ export type SandboxSnapshotCatalogResponse = {
 export type SandboxTemplateCatalogResponse = {
   templates: SandboxTemplateCatalogEntry[];
 };
+
+export type SandboxPublishedSnapshotCatalogResponse =
+  SandboxTemplateCatalogResponse & {
+    publishedSnapshots: SandboxTemplateCatalogEntry[];
+  };

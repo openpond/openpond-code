@@ -155,7 +155,10 @@ export type {
   ToolExecuteResponse,
 } from "./api";
 import {
+  getOpChatModel,
+  listOpChatModels,
   resolveHostedChatApiBaseUrl,
+  resolveOpChatApiBaseUrl,
   listHostedModels,
   sendHostedChatTurn,
   streamHostedChatTurn,
@@ -163,6 +166,7 @@ import {
 import {
   DEFAULT_OPENPOND_API_BASE_URL,
   DEFAULT_OPENPOND_CHAT_API_BASE_URL,
+  DEFAULT_OPENPOND_OPCHAT_API_BASE_URL,
   DEFAULT_OPENPOND_WEB_BASE_URL,
 } from "./urls";
 export type {
@@ -180,12 +184,23 @@ export type {
   HostedChatRequestOptions,
   HostedChatRole,
   HostedChatStreamDelta,
+  HostedChatTool,
+  HostedChatToolCall,
+  HostedChatToolChoice,
   HostedChatUsage,
   HostedChatApiBaseUrlOptions,
   HostedModel,
+  HostedModelRequestOptions,
   HostedModelsRequestOptions,
   HostedModelsResponse,
 } from "./hosted-chat";
+export type {
+  OpChatCompletionSummary,
+  OpChatSmokeOptions,
+  OpChatSmokeSummary,
+  OpChatStreamSummary,
+  OpChatToolSummary,
+} from "./opchat-smoke";
 export type {
   Bar as IndicatorBar,
   BollingerResult,
@@ -245,14 +260,19 @@ export {
 export {
   DEFAULT_OPENPOND_API_BASE_URL,
   DEFAULT_OPENPOND_CHAT_API_BASE_URL,
+  DEFAULT_OPENPOND_OPCHAT_API_BASE_URL,
   DEFAULT_OPENPOND_WEB_BASE_URL,
 } from "./urls";
 export {
+  getOpChatModel,
+  listOpChatModels,
   listHostedModels,
   resolveHostedChatApiBaseUrl,
+  resolveOpChatApiBaseUrl,
   sendHostedChatTurn,
   streamHostedChatTurn,
 } from "./hosted-chat";
+export { runOpChatSmoke } from "./opchat-smoke";
 export {
   computeAtr,
   computeBollinger,
@@ -380,8 +400,9 @@ function resolveChatApiUrl(
   options: OpenPondClientOptions,
   apiUrl: string
 ): string {
-  return resolveHostedChatApiBaseUrl({
+  return resolveOpChatApiBaseUrl({
     apiBaseUrl: apiUrl,
+    opChatApiBaseUrl: options.opChatApiUrl,
     chatApiBaseUrl: options.chatApiUrl,
   });
 }
@@ -640,7 +661,9 @@ export function createClient(options: OpenPondClientOptions): OpenPondClient {
     },
     chat: {
       models: async () =>
-        listHostedModels({ apiBaseUrl: chatApiUrl, token: apiKey }),
+        listOpChatModels({ apiBaseUrl: chatApiUrl, token: apiKey }),
+      model: async (model) =>
+        getOpChatModel({ apiBaseUrl: chatApiUrl, token: apiKey, model }),
       send: async (input) =>
         sendHostedChatTurn({ ...input, apiBaseUrl: chatApiUrl, token: apiKey }),
       stream: (input) =>

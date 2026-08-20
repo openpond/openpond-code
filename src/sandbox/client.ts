@@ -5,6 +5,7 @@ import {
   createSandboxNamespace,
   createSandboxProjectNamespace,
   createSandboxRuntimeNamespace,
+  createSandboxWorkItemNamespace,
 } from "./client-handles";
 import { createSandboxRuntimeHandle } from "./runtime-handle";
 import { runSandboxSmoke } from "./smoke";
@@ -14,11 +15,14 @@ import type {
   SandboxIntegrationConnectionLeaseInput,
   SandboxCreateInput,
   SandboxCreateOptions,
+  SandboxAsyncRequestOptions,
   SandboxScheduleCreateInput,
   SandboxScheduleUpdateInput,
   SandboxForkInput,
   SandboxForkOptions,
   SandboxTemplateLaunchInput,
+  SandboxPublishedSnapshotBuildCreateInput,
+  SandboxPublishedSnapshotBuildRecord,
   SandboxSecretMetadata,
   SandboxSecretCreateInput,
   SandboxSecretRotateInput,
@@ -31,6 +35,7 @@ import type {
   SandboxPtyInput,
   SandboxOpenPortInput,
   SandboxGitDiffInput,
+  SandboxGitPatchExportInput,
   SandboxGitBranchInput,
   SandboxGitCommitInput,
   SandboxGitPullInput,
@@ -58,17 +63,46 @@ import type {
   SandboxAgent,
   SandboxProjectUpsertInput,
   SandboxProjectUpdateInput,
+  SandboxProjectSourceUploadInput,
+  SandboxProjectGitRemoteResponse,
   SandboxAgentUpsertInput,
   SandboxAgentUpdateInput,
   SandboxAgentRunInput,
+  SandboxAgentSourceChecksRequestInput,
+  SandboxAgentSourceChecksRequestResult,
+  SandboxAgentSourceDeployPlan,
+  SandboxAgentSourceDeployPlanResponse,
+  SandboxAgentSourcePublishInput,
+  SandboxAgentSourcePublishResult,
+  SandboxAgentEditWorkItemOpenInput,
+  SandboxAgentEditWorkItemOpenResult,
+  SandboxCodingWorkItem,
+  SandboxCodingWorkItemActivity,
+  SandboxCodingWorkItemActivityListInput,
+  SandboxCodingWorkItemArtifact,
+  SandboxCodingWorkItemBackgroundInput,
+  SandboxCodingWorkItemBackgroundResult,
+  SandboxCodingWorkItemChatInput,
+  SandboxCodingWorkItemChatResult,
+  SandboxCodingWorkItemGetInput,
+  SandboxCodingWorkItemPromotionInput,
+  SandboxCodingWorkItemStatusResult,
+  SandboxAgentManifestSnapshot,
+  SandboxAgentManifestSnapshotsResponse,
   SandboxProjectListResponse,
   SandboxProjectResponse,
   SandboxAgentListResponse,
   SandboxAgentResponse,
   SandboxAgentRunResponse,
+  MicrosoftTeamsBotOverview,
+  MicrosoftTeamsBotBindingTargetInput,
+  MicrosoftTeamsBotBindingResponse,
+  MicrosoftTeamsBotDiagnosticRunInput,
+  MicrosoftTeamsBotDiagnosticRunResponse,
   SandboxRecord,
   SandboxCreateResponse,
   SandboxSnapshotCatalogResponse,
+  SandboxPublishedSnapshotCatalogResponse,
   SandboxTemplateCatalogResponse,
   SandboxRuntime,
   SandboxRuntimeCreateInput,
@@ -76,6 +110,7 @@ import type {
   SandboxRuntimeEventInput,
   SandboxRuntimeCheckpointInput,
   SandboxRuntimePromoteInput,
+  SandboxRuntimeSourcePreserveInput,
   SandboxRuntimeTransitionInput,
   SandboxRuntimeListResponse,
   SandboxRuntimeResponse,
@@ -83,6 +118,7 @@ import type {
   SandboxRuntimeEventResponse,
   SandboxRuntimeEventsResponse,
   SandboxRuntimePromoteResponse,
+  SandboxRuntimeSourcePreserveResponse,
   SandboxIntegrationConnectionsResponse,
   SandboxIntegrationLeasesResponse,
   SandboxExecResponse,
@@ -99,6 +135,7 @@ import type {
   SandboxSnapshotResponse,
   SandboxSnapshotValidationResponse,
   SandboxForkResponse,
+  SandboxPublishedSnapshotLaunchResponse,
   SandboxTemplateLaunchResponse,
   SandboxScheduleListResponse,
   SandboxScheduleResponse,
@@ -109,6 +146,9 @@ import type {
   SandboxReplayListResponse,
   SandboxReplayLogsResponse,
   SandboxReplayArtifactsResponse,
+  SandboxPublishedSnapshotBuildResponse,
+  SandboxPublishedSnapshotBuildListResponse,
+  SandboxPublishedSnapshotBuildLogsResponse,
   SandboxTemplateBuildResponse,
   SandboxTemplateBuildListResponse,
   SandboxTemplateBuildLogsResponse,
@@ -118,12 +158,14 @@ import type {
   OpenPondOrganizationMemberResponse,
   OpenPondOrganizationMcpServerResponse,
   SandboxReceiptResponse,
+  SandboxLifecycleAcceptedResponse,
   SandboxStartResponse,
   SandboxRestoreResponse,
   SandboxReceiptsResponse,
   SandboxLogsResponse,
   SandboxGitStatusResponse,
   SandboxGitDiffResponse,
+  SandboxGitPatchExportResponse,
   SandboxGitBranchResponse,
   SandboxGitCommitResponse,
   SandboxGitPullResponse,
@@ -147,6 +189,14 @@ import type {
 } from "./types/index";
 import { apiRootUrlFromSandboxApiUrl, normalizeSandboxApiUrl } from "./url";
 
+function asyncRequestHeaders(
+  options: SandboxAsyncRequestOptions = {}
+): HeadersInit | undefined {
+  return options.async || options.respondAsync
+    ? { Prefer: "respond-async" }
+    : undefined;
+}
+
 export class OpenPondSandboxClient {
   private readonly apiKey: string;
   private readonly apiRootUrl: string;
@@ -164,6 +214,7 @@ export class OpenPondSandboxClient {
   readonly sandboxes = createSandboxNamespace(this);
   readonly projects = createSandboxProjectNamespace(this);
   readonly agents = createSandboxAgentNamespace(this);
+  readonly workItems = createSandboxWorkItemNamespace(this);
 
   list(
     input: {
@@ -339,6 +390,13 @@ export class OpenPondSandboxClient {
     }).then((payload) => payload.project);
   }
 
+  async upsertProjectGitRemote(
+    input: SandboxProjectUpsertInput
+  ): Promise<SandboxProjectGitRemoteResponse> {
+    const project = await this.upsertProject(input);
+    return this.ensureProjectGitRemote(project.id, { teamId: input.teamId });
+  }
+
   getProject(
     projectId: string,
     input: { teamId: string }
@@ -357,6 +415,32 @@ export class OpenPondSandboxClient {
     return this.requestApiRoot<SandboxProjectResponse>(
       `/projects/${encodeURIComponent(projectId)}/sync?${query.toString()}`,
       { method: "POST" }
+    ).then((payload) => payload.project);
+  }
+
+  ensureProjectGitRemote(
+    projectId: string,
+    input: { teamId: string }
+  ): Promise<SandboxProjectGitRemoteResponse> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    return this.requestApiRoot<SandboxProjectGitRemoteResponse>(
+      `/projects/${encodeURIComponent(projectId)}/git?${query.toString()}`,
+      { method: "POST" }
+    );
+  }
+
+  uploadProjectSource(
+    projectId: string,
+    input: SandboxProjectSourceUploadInput
+  ): Promise<SandboxProject> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    const { teamId: _teamId, ...body } = input;
+    return this.requestApiRoot<SandboxProjectResponse>(
+      `/projects/${encodeURIComponent(projectId)}/source?${query.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
     ).then((payload) => payload.project);
   }
 
@@ -449,6 +533,229 @@ export class OpenPondSandboxClient {
     );
   }
 
+  getAgentSourceDeployPlan(
+    agentId: string,
+    input: { teamId: string }
+  ): Promise<SandboxAgentSourceDeployPlan> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    return this.requestApiRoot<SandboxAgentSourceDeployPlanResponse>(
+      `/agents/${encodeURIComponent(
+        agentId
+      )}/source/deploy-plan?${query.toString()}`
+    ).then((payload) => payload.deployPlan);
+  }
+
+  listAgentManifestSnapshots(
+    agentId: string,
+    input: { teamId: string; limit?: number }
+  ): Promise<SandboxAgentManifestSnapshot[]> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    return this.requestApiRoot<SandboxAgentManifestSnapshotsResponse>(
+      `/agents/${encodeURIComponent(
+        agentId
+      )}/source/manifest-snapshots?${query.toString()}`
+    ).then((payload) => payload.manifestSnapshots);
+  }
+
+  requestAgentSourceChecks(
+    agentId: string,
+    input: SandboxAgentSourceChecksRequestInput
+  ): Promise<SandboxAgentSourceChecksRequestResult> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    const { teamId: _teamId, ...body } = input;
+    return this.requestApiRoot<SandboxAgentSourceChecksRequestResult>(
+      `/agents/${encodeURIComponent(
+        agentId
+      )}/source/checks?${query.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    );
+  }
+
+  publishAgentSource(
+    agentId: string,
+    input: SandboxAgentSourcePublishInput
+  ): Promise<SandboxAgentSourcePublishResult> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    const { teamId: _teamId, ...body } = input;
+    return this.requestApiRoot<SandboxAgentSourcePublishResult>(
+      `/agents/${encodeURIComponent(
+        agentId
+      )}/source/publish?${query.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    );
+  }
+
+  openAgentEditWorkItem(
+    agentId: string,
+    input: SandboxAgentEditWorkItemOpenInput
+  ): Promise<SandboxAgentEditWorkItemOpenResult> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    const { teamId: _teamId, ...body } = input;
+    return this.requestApiRoot<SandboxAgentEditWorkItemOpenResult>(
+      `/agents/${encodeURIComponent(
+        agentId
+      )}/edit-work-item?${query.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    );
+  }
+
+  getCodingWorkItem(
+    workItemId: string,
+    input: SandboxCodingWorkItemGetInput
+  ): Promise<SandboxCodingWorkItem> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    if (input.includeArchived) query.set("includeArchived", "true");
+    return this.requestApiRoot<{ workItem: SandboxCodingWorkItem }>(
+      `/work-items/${encodeURIComponent(workItemId)}?${query.toString()}`
+    ).then((payload) => payload.workItem);
+  }
+
+  sendCodingWorkItemChat(
+    workItemId: string,
+    input: SandboxCodingWorkItemChatInput
+  ): Promise<SandboxCodingWorkItemChatResult> {
+    return this.requestApiRoot<SandboxCodingWorkItemChatResult>(
+      `/work-items/${encodeURIComponent(workItemId)}/chat`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    );
+  }
+
+  listCodingWorkItemActivity(
+    workItemId: string,
+    input: SandboxCodingWorkItemActivityListInput
+  ): Promise<SandboxCodingWorkItemActivity[]> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    return this.requestApiRoot<{ activity: SandboxCodingWorkItemActivity[] }>(
+      `/work-items/${encodeURIComponent(
+        workItemId
+      )}/activity?${query.toString()}`
+    ).then((payload) => payload.activity);
+  }
+
+  getCodingWorkItemStatus(
+    workItemId: string,
+    input: SandboxCodingWorkItemActivityListInput & { includeArchived?: boolean }
+  ): Promise<SandboxCodingWorkItemStatusResult> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    if (input.includeArchived) query.set("includeArchived", "true");
+    return this.requestApiRoot<SandboxCodingWorkItemStatusResult>(
+      `/work-items/${encodeURIComponent(workItemId)}/status?${query.toString()}`
+    );
+  }
+
+  handleCodingWorkItemInBackground(
+    workItemId: string,
+    input: SandboxCodingWorkItemBackgroundInput
+  ): Promise<SandboxCodingWorkItemBackgroundResult> {
+    return this.requestApiRoot<SandboxCodingWorkItemBackgroundResult>(
+      `/work-items/${encodeURIComponent(workItemId)}/handle-background`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    );
+  }
+
+  promoteCodingWorkItemResult(
+    workItemId: string,
+    action: "checkpoint" | "commit" | "pr",
+    input: SandboxCodingWorkItemPromotionInput
+  ): Promise<SandboxCodingWorkItemArtifact> {
+    return this.requestApiRoot<{ artifact: SandboxCodingWorkItemArtifact }>(
+      `/work-items/${encodeURIComponent(workItemId)}/result/${action}`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    ).then((payload) => payload.artifact);
+  }
+
+  getMicrosoftTeamsBotOverview(input: {
+    teamId: string;
+  }): Promise<MicrosoftTeamsBotOverview> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    return this.requestApiRoot<MicrosoftTeamsBotOverview>(
+      `/teams/bot/overview?${query.toString()}`
+    );
+  }
+
+  bindMicrosoftTeamsBotConversation(
+    input: MicrosoftTeamsBotBindingTargetInput & { token: string }
+  ): Promise<MicrosoftTeamsBotBindingResponse> {
+    return this.requestApiRoot<MicrosoftTeamsBotBindingResponse>(
+      "/teams/bot/bindings",
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    );
+  }
+
+  rebindMicrosoftTeamsBotConversation(
+    bindingId: string,
+    input: MicrosoftTeamsBotBindingTargetInput
+  ): Promise<MicrosoftTeamsBotBindingResponse> {
+    return this.requestApiRoot<MicrosoftTeamsBotBindingResponse>(
+      `/teams/bot/bindings/${encodeURIComponent(bindingId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      }
+    );
+  }
+
+  unlinkMicrosoftTeamsBotConversation(input: {
+    teamId: string;
+    bindingId: string;
+  }): Promise<MicrosoftTeamsBotBindingResponse> {
+    return this.requestApiRoot<MicrosoftTeamsBotBindingResponse>(
+      `/teams/bot/bindings/${encodeURIComponent(input.bindingId)}`,
+      {
+        method: "DELETE",
+        body: JSON.stringify({ teamId: input.teamId }),
+      }
+    );
+  }
+
+  sendMicrosoftTeamsBotDiagnostic(input: {
+    teamId: string;
+    bindingId: string;
+  }): Promise<MicrosoftTeamsBotBindingResponse & { diagnosticStatus: string }> {
+    return this.requestApiRoot<
+      MicrosoftTeamsBotBindingResponse & { diagnosticStatus: string }
+    >("/teams/bot/diagnostics", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  sendMicrosoftTeamsBotDiagnosticRun(
+    input: MicrosoftTeamsBotDiagnosticRunInput
+  ): Promise<MicrosoftTeamsBotDiagnosticRunResponse> {
+    return this.requestApiRoot<MicrosoftTeamsBotDiagnosticRunResponse>(
+      "/teams/bot/diagnostics/run",
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    );
+  }
+
   createSandboxRuntime(
     input: SandboxRuntimeCreateInput
   ): Promise<SandboxRuntime> {
@@ -473,12 +780,14 @@ export class OpenPondSandboxClient {
 
   createSandboxRuntimeSandbox(
     runtimeId: string,
-    input: SandboxRuntimeSandboxCreateInput = {}
+    input: SandboxRuntimeSandboxCreateInput = {},
+    options: SandboxAsyncRequestOptions = {}
   ): Promise<SandboxRuntimeSandboxResponse> {
     return this.requestApiRoot<SandboxRuntimeSandboxResponse>(
       `/runtimes/${encodeURIComponent(runtimeId)}/sandbox`,
       {
         method: "POST",
+        headers: asyncRequestHeaders(options),
         body: JSON.stringify(input),
       }
     );
@@ -549,6 +858,24 @@ export class OpenPondSandboxClient {
     );
   }
 
+  preserveSandboxRuntimeSource(
+    runtimeId: string,
+    input: SandboxRuntimeSourcePreserveInput = {},
+    options: { teamId?: string } = {}
+  ): Promise<SandboxRuntimeSourcePreserveResponse> {
+    const query = new URLSearchParams();
+    if (options.teamId) query.set("teamId", options.teamId);
+    return this.requestApiRoot<SandboxRuntimeSourcePreserveResponse>(
+      `/runtimes/${encodeURIComponent(runtimeId)}/preserve-source${
+        query.size > 0 ? `?${query.toString()}` : ""
+      }`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    );
+  }
+
   forkSnapshot(
     snapshotId: string,
     input: SandboxForkInput & { teamId?: string; projectId?: string } = {},
@@ -602,6 +929,47 @@ export class OpenPondSandboxClient {
     );
   }
 
+  publishedSnapshots(
+    input: {
+      teamId?: string;
+      projectId?: string;
+      q?: string;
+      name?: string;
+      version?: string;
+      visibility?: SandboxSnapshotTemplateVisibility;
+      tag?: string;
+      useCase?: string;
+      limit?: number;
+    } = {}
+  ): Promise<SandboxPublishedSnapshotCatalogResponse> {
+    const query = new URLSearchParams();
+    if (input.teamId) query.set("teamId", input.teamId);
+    if (input.projectId) query.set("projectId", input.projectId);
+    if (input.q) query.set("q", input.q);
+    if (input.name) query.set("name", input.name);
+    if (input.version) query.set("version", input.version);
+    if (input.visibility) query.set("visibility", input.visibility);
+    if (input.tag) query.set("tag", input.tag);
+    if (input.useCase) query.set("useCase", input.useCase);
+    if (input.limit) query.set("limit", String(input.limit));
+    return this.request<
+      SandboxTemplateCatalogResponse &
+        Partial<
+          Pick<SandboxPublishedSnapshotCatalogResponse, "publishedSnapshots">
+        >
+    >(
+      `/published-snapshots${query.size > 0 ? `?${query.toString()}` : ""}`
+    ).then((payload) => {
+      const publishedSnapshots =
+        payload.publishedSnapshots ?? payload.templates;
+      return {
+        ...payload,
+        templates: publishedSnapshots,
+        publishedSnapshots,
+      };
+    });
+  }
+
   launchTemplate(
     input: SandboxTemplateLaunchInput & { teamId?: string; projectId?: string }
   ): Promise<SandboxTemplateLaunchResponse> {
@@ -616,6 +984,34 @@ export class OpenPondSandboxClient {
         body: JSON.stringify(body),
       }
     );
+  }
+
+  runPublishedSnapshot(
+    input: SandboxTemplateLaunchInput & { teamId?: string; projectId?: string }
+  ): Promise<SandboxPublishedSnapshotLaunchResponse> {
+    const query = new URLSearchParams();
+    if (input.teamId) query.set("teamId", input.teamId);
+    if (input.projectId) query.set("projectId", input.projectId);
+    const { teamId: _teamId, projectId: _projectId, ...body } = input;
+    return this.request<
+      SandboxTemplateLaunchResponse &
+        Partial<Pick<SandboxPublishedSnapshotLaunchResponse, "publishedSnapshot">>
+    >(
+      `/published-snapshots/launch${
+        query.size > 0 ? `?${query.toString()}` : ""
+      }`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    ).then((payload) => {
+      const publishedSnapshot = payload.publishedSnapshot ?? payload.template;
+      return {
+        ...payload,
+        template: publishedSnapshot,
+        publishedSnapshot,
+      };
+    });
   }
 
   listSchedules(
@@ -742,6 +1138,54 @@ export class OpenPondSandboxClient {
   cancelTemplateBuild(buildId: string): Promise<SandboxTemplateBuildRecord> {
     return this.requestApiRoot<SandboxTemplateBuildResponse>(
       `/sandbox-template-builds/${encodeURIComponent(buildId)}/cancel`,
+      {
+        method: "POST",
+      }
+    ).then((payload) => payload.build);
+  }
+
+  listPublishedSnapshotBuilds(input: {
+    teamId: string;
+  }): Promise<SandboxPublishedSnapshotBuildRecord[]> {
+    const query = new URLSearchParams({ teamId: input.teamId });
+    return this.requestApiRoot<SandboxPublishedSnapshotBuildListResponse>(
+      `/published-snapshot-builds?${query.toString()}`
+    ).then((payload) => payload.builds);
+  }
+
+  createPublishedSnapshotBuild(
+    input: SandboxPublishedSnapshotBuildCreateInput
+  ): Promise<SandboxPublishedSnapshotBuildRecord> {
+    return this.requestApiRoot<SandboxPublishedSnapshotBuildResponse>(
+      "/published-snapshot-builds",
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    ).then((payload) => payload.build);
+  }
+
+  getPublishedSnapshotBuild(
+    buildId: string
+  ): Promise<SandboxPublishedSnapshotBuildRecord> {
+    return this.requestApiRoot<SandboxPublishedSnapshotBuildResponse>(
+      `/published-snapshot-builds/${encodeURIComponent(buildId)}`
+    ).then((payload) => payload.build);
+  }
+
+  getPublishedSnapshotBuildLogs(
+    buildId: string
+  ): Promise<SandboxPublishedSnapshotBuildLogsResponse> {
+    return this.requestApiRoot<SandboxPublishedSnapshotBuildLogsResponse>(
+      `/published-snapshot-builds/${encodeURIComponent(buildId)}/logs`
+    );
+  }
+
+  cancelPublishedSnapshotBuild(
+    buildId: string
+  ): Promise<SandboxPublishedSnapshotBuildRecord> {
+    return this.requestApiRoot<SandboxPublishedSnapshotBuildResponse>(
+      `/published-snapshot-builds/${encodeURIComponent(buildId)}/cancel`,
       {
         method: "POST",
       }
@@ -976,7 +1420,7 @@ export class OpenPondSandboxClient {
   ): Promise<SandboxRecord> {
     return this.request<SandboxCreateResponse>("", {
       method: "POST",
-      headers: options.async ? { Prefer: "respond-async" } : undefined,
+      headers: asyncRequestHeaders(options),
       body: JSON.stringify(input),
     }).then((payload) => payload.sandbox);
   }
@@ -1365,20 +1809,34 @@ export class OpenPondSandboxClient {
     );
   }
 
-  stop(sandboxId: string): Promise<SandboxReceiptResponse> {
+  stop(
+    sandboxId: string,
+    options: SandboxAsyncRequestOptions = {}
+  ): Promise<SandboxReceiptResponse | SandboxLifecycleAcceptedResponse> {
+    const query = new URLSearchParams();
+    if (options.failOnUnpreservedChanges) {
+      query.set("failOnUnpreservedChanges", "true");
+    }
     return this.request<SandboxReceiptResponse>(
-      `/${encodeURIComponent(sandboxId)}/stop`,
+      `/${encodeURIComponent(sandboxId)}/stop${
+        query.size > 0 ? `?${query.toString()}` : ""
+      }`,
       {
         method: "POST",
+        headers: asyncRequestHeaders(options),
       }
     );
   }
 
-  start(sandboxId: string): Promise<SandboxStartResponse> {
+  start(
+    sandboxId: string,
+    options: SandboxAsyncRequestOptions = {}
+  ): Promise<SandboxStartResponse> {
     return this.request<SandboxStartResponse>(
       `/${encodeURIComponent(sandboxId)}/start`,
       {
         method: "POST",
+        headers: asyncRequestHeaders(options),
       }
     );
   }
@@ -1392,11 +1850,21 @@ export class OpenPondSandboxClient {
     );
   }
 
-  delete(sandboxId: string): Promise<SandboxRecord> {
+  delete(
+    sandboxId: string,
+    options: SandboxAsyncRequestOptions = {}
+  ): Promise<SandboxRecord> {
+    const query = new URLSearchParams();
+    if (options.failOnUnpreservedChanges) {
+      query.set("failOnUnpreservedChanges", "true");
+    }
     return this.request<{ sandbox: SandboxRecord }>(
-      `/${encodeURIComponent(sandboxId)}`,
+      `/${encodeURIComponent(sandboxId)}${
+        query.size > 0 ? `?${query.toString()}` : ""
+      }`,
       {
         method: "DELETE",
+        headers: asyncRequestHeaders(options),
       }
     ).then((payload) => payload.sandbox);
   }
@@ -1425,6 +1893,19 @@ export class OpenPondSandboxClient {
   ): Promise<SandboxGitDiffResponse> {
     return this.request<SandboxGitDiffResponse>(
       `/${encodeURIComponent(sandboxId)}/git/diff`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    );
+  }
+
+  gitExportPatch(
+    sandboxId: string,
+    input: SandboxGitPatchExportInput = {}
+  ): Promise<SandboxGitPatchExportResponse> {
+    return this.request<SandboxGitPatchExportResponse>(
+      `/${encodeURIComponent(sandboxId)}/git/export-patch`,
       {
         method: "POST",
         body: JSON.stringify(input),

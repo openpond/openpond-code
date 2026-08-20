@@ -34,16 +34,79 @@ const RelativeWorkspacePathSchema = z
     message: "path must be a relative workspace path",
   });
 
+const OciImageRefSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(500)
+  .refine(
+    (value) => !value.includes("\0") && !/\s/.test(value),
+    "image ref must be a single OCI reference"
+  );
+
+const OciDigestSchema = z
+  .string()
+  .trim()
+  .regex(/^sha256:[0-9a-f]{64}$/i);
+
+const RuntimeWorkspaceRootSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(500)
+  .refine(
+    (value) => value.startsWith("/") && !value.includes("\0"),
+    "workspaceRoot must be an absolute guest path"
+  );
+
+const DockerfileRuntimeImageSchema = z
+  .object({
+    ref: OciImageRefSchema,
+    digest: OciDigestSchema.optional(),
+    registrySecretRef: z.string().trim().min(1).max(500).optional(),
+    platform: z.literal("linux/amd64").optional(),
+    workspaceRoot: RuntimeWorkspaceRootSchema.optional(),
+  })
+  .strict();
+
+const DockerfileRuntimeSourceSchema = z
+  .object({
+    context: RelativeWorkspacePathSchema.default("."),
+    path: RelativeWorkspacePathSchema.default("Dockerfile"),
+    target: z.string().trim().min(1).max(191).optional(),
+    buildArgs: z.record(z.string().max(191), z.string().max(500)).optional(),
+    registrySecretRefs: z
+      .array(z.string().trim().min(1).max(500))
+      .max(10)
+      .optional(),
+    platform: z.literal("linux/amd64").optional(),
+    workspaceRoot: RuntimeWorkspaceRootSchema.optional(),
+  })
+  .strict();
+
 const SandboxTemplateRuntimeSchema = z
   .object({
     base: z.string().trim().min(1).max(120).optional(),
     snapshot: z.string().trim().min(1).max(191).optional(),
+    image: DockerfileRuntimeImageSchema.optional(),
+    dockerfile: DockerfileRuntimeSourceSchema.optional(),
   })
   .strict()
-  .refine(
-    (runtime) => Boolean(runtime.base) !== Boolean(runtime.snapshot),
-    "runtime must declare exactly one of base or snapshot"
-  );
+  .superRefine((runtime, context) => {
+    const selected = [
+      runtime.base,
+      runtime.snapshot,
+      runtime.image,
+      runtime.dockerfile,
+    ].filter(Boolean).length;
+    if (selected !== 1) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "runtime must declare exactly one of base, snapshot, image, or dockerfile",
+      });
+    }
+  });
 
 const SandboxTemplateResourcesSchema = z
   .object({
@@ -63,6 +126,20 @@ const SandboxTemplateRequiredLeaseSchema = z
       .default([]),
   })
   .strict();
+
+const SandboxTemplateOpChatPermissionsSchema = z
+  .object({
+    models: z.array(z.string().trim().min(1).max(200)).max(100).default([]),
+    scopes: z.array(z.string().trim().min(1).max(200)).max(100).default([]),
+  })
+  .strict();
+
+const SandboxTemplatePermissionsSchema = z
+  .object({
+    opchat: SandboxTemplateOpChatPermissionsSchema.optional(),
+  })
+  .catchall(z.record(z.string(), z.unknown()))
+  .default({});
 
 const SandboxTemplateVolumeSchema = z
   .object({
@@ -362,6 +439,7 @@ export const SandboxTemplateManifestSchema = z
       })
       .strict()
       .default({ requiredLeases: [] }),
+    permissions: SandboxTemplatePermissionsSchema,
     inputs: z
       .object({
         schema: SandboxTemplateJsonSchema.default({ type: "object" }),

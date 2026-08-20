@@ -51,7 +51,7 @@ export function printHelp(): void {
     `  openpond sandbox-template dev [--file ${OPENPOND_MANIFEST_FILE_NAME}|--build dist/${SANDBOX_TEMPLATE_BUILD_PLAN_FILE_NAME}] [--service <name>]`
   );
   console.log(
-    `  openpond sandbox-template start [--file ${OPENPOND_MANIFEST_FILE_NAME}] [--env-ref NAME=openpond://secret/...] [--input-file name=path] [--input-files name=glob] [--target <name>|--action <name>|--service <name>] [--project-id <projectId>] [--agent-id <agentId>] [--runtime-mode <mode> --runtime-project-id <projectId>] [--enable-schedules [all|name,...]|--disable-schedules [all|name,...]] [--schedule-overrides <json>] [--commit] [--no-push]`
+    `  openpond sandbox-template start [--file ${OPENPOND_MANIFEST_FILE_NAME}] [--env-ref NAME=openpond://secret/...] [--input-file name=path] [--input-files name=glob] [--target <name>|--action <name>|--service <name>] [--project-id <projectId>] [--agent-id <agentId>] [--workflow-mode <mode> --runtime-project-id <projectId>] [--enable-schedules [all|name,...]|--disable-schedules [all|name,...]] [--schedule-overrides <json>] [--commit] [--no-push]`
   );
   console.log(
     `  openpond sandbox-template action <sandboxId> <actionName> [--file ${OPENPOND_MANIFEST_FILE_NAME}]`
@@ -93,18 +93,83 @@ export function printHelp(): void {
     "  openpond project update <projectId> --team-id <id> [--name <name>] [--description <text>] [--default-branch <branch>]"
   );
   console.log("  openpond project sync <projectId> --team-id <id>");
+  console.log(
+    "  openpond project source-upload <projectId> --team-id <id> [--path <dir>] [--branch <branch>] [--commit-message <text>]"
+  );
   console.log("  openpond project archive <projectId> --team-id <id>");
+  console.log('  openpond goal "<objective>" [--cwd <path>]');
+  console.log("  openpond goal run --goal-id <id> [--cwd <path>]");
+  console.log('  openpond goal create-agent "<agent idea>" [--cwd <path>]');
+  console.log(
+    "  openpond goal answer <question-id> --choice <choice-id>|--answer <text> [--goal-id <id>] [--cwd <path>]"
+  );
+  console.log("  openpond goal approve|pause|resume|cancel <goal-id>");
   console.log("  openpond agent list --team-id <id>");
   console.log(
-    "  openpond agent create --team-id <id> --project-id <id> --name <name> [--entrypoint-scope entire_manifest|action|service|schedule] [--entrypoint-name <name>] [--trigger-type manual|schedule|endpoint|background] [--runtime-mode <mode>]"
+    "  openpond agent inspect|build|validate|eval|traces [--cwd <project>]"
   );
   console.log(
-    "  openpond agent update <agentId> --team-id <id> [--name <name>] [--trigger-type manual|schedule|endpoint|background] [--runtime-mode <mode>]"
+    "  openpond agent run <action> [--cwd <project>] [--input <json>]  # local SDK action"
   );
   console.log(
-    "  openpond agent run <agentId> --team-id <id> [--idempotency-key <key>] [--input <json>]"
+    "  openpond agent create --team-id <id> --project-id <id> --name <name> [--entrypoint-scope entire_manifest|action|service|schedule] [--entrypoint-name <name>] [--trigger-type manual|schedule|endpoint|background] [--workflow-mode <mode>]"
+  );
+  console.log(
+    "  openpond agent update <agentId> --team-id <id> [--name <name>] [--trigger-type manual|schedule|endpoint|background] [--workflow-mode <mode>]"
+  );
+  console.log(
+    "  openpond agent bind-source <agentId> --team-id <id> --source-mode latest_source|published_snapshot|auto [--published-snapshot-id <id>]"
+  );
+  console.log(
+    "  openpond agent run <agentId> --team-id <id> [--idempotency-key <key>] [--input <json>] [--require-published-snapshot true]"
+  );
+  console.log(
+    "  openpond agent run-test <agentId> --team-id <id> [--input <json>] [--allow-latest-source true]"
+  );
+  console.log(
+    "  openpond agent source deploy-plan <agentId> --team-id <id>"
+  );
+  console.log(
+    "  openpond agent source checks <agentId> --team-id <id> [--check-kind validate|eval|publish_review|all] [--source-ref <ref>] [--base-sha <sha>]"
+  );
+  console.log(
+    "  openpond agent source check-status <workItemId> --team-id <id> [--limit <n>]"
+  );
+  console.log(
+    "  openpond agent source manifest-snapshots <agentId> --team-id <id> [--limit <n>]"
+  );
+  console.log(
+    "  openpond agent source publish <agentId> --team-id <id> [--expected-manifest-hash <hash>] [--expected-source-commit-sha <sha>]"
+  );
+  console.log(
+    "  openpond agent edit open <agentId> --team-id <id> --project-id <id> [--message <text>] [--source-ref <ref>] [--base-sha <sha>]"
+  );
+  console.log(
+    "  openpond agent edit chat <workItemId> --team-id <id> --message <text> [--chat-mode queue_cloud|sync_cloud]"
+  );
+  console.log(
+    "  openpond agent edit activity <workItemId> --team-id <id> [--limit <n>]"
+  );
+  console.log(
+    "  openpond agent edit background <workItemId> --team-id <id> [--prompt <text>] [--agent-edit <json>]"
+  );
+  console.log(
+    "  openpond agent edit request-checks <agentId> --team-id <id> [--check-kind validate|eval|publish_review|all]"
+  );
+  console.log(
+    "  openpond agent edit check-status <workItemId> --team-id <id> [--limit <n>]"
+  );
+  console.log(
+    "  openpond agent edit checkpoint-result|commit-result|pr-result <workItemId> --team-id <id> --ref <artifact-ref>"
   );
   console.log("  openpond agent archive <agentId> --team-id <id>");
+  console.log("  openpond teams-bot overview --team-id <id>");
+  console.log(
+    "  openpond teams-bot rebind <bindingId> --team-id <id> [--project-id <id>] [--agent-id <id>] [--microsoft-connection-id <id>]"
+  );
+  console.log(
+    "  openpond teams-bot diagnostic-run <bindingId> --team-id <id> --prompt <text> [--attachments-json <json-array>] [--action-input-json <json-object>]"
+  );
   console.log(
     "  openpond sandbox list [--env staging] [--team-id <id>] [--project-id <id>] [--agent-id <id>] [--sandbox-api-url <url>]"
   );
@@ -127,17 +192,17 @@ export function printHelp(): void {
     "  openpond sandbox snapshots [--team-id <id>] [--project-id <id>] [--agent-id <id>]"
   );
   console.log(
-    "  openpond sandbox templates [--team-id <id>] [--project-id <id>] [--query <text>] [--name <name>] [--use-case <id>]"
+    "  openpond sandbox published-snapshots [--team-id <id>] [--project-id <id>] [--query <text>] [--name <name>] [--use-case <id>]"
   );
-  console.log("  openpond sandbox template-builds --team-id <id>");
+  console.log("  openpond sandbox published-snapshot-builds --team-id <id>");
   console.log(
-    "  openpond sandbox template-build-create --team-id <id> [--source-repo-url <url>|--source-project-id <id>] [--branch <branch>] [--publish]"
+    "  openpond sandbox published-snapshot-build-create --team-id <id> [--source-repo-url <url>|--source-project-id <id>] [--branch <branch>] [--publish]"
   );
-  console.log("  openpond sandbox template-build-get <buildId>");
-  console.log("  openpond sandbox template-build-logs <buildId>");
-  console.log("  openpond sandbox template-build-cancel <buildId>");
+  console.log("  openpond sandbox published-snapshot-build-get <buildId>");
+  console.log("  openpond sandbox published-snapshot-build-logs <buildId>");
+  console.log("  openpond sandbox published-snapshot-build-cancel <buildId>");
   console.log(
-    "  openpond sandbox template-build-watch <buildId> [--interval-ms 5000] [--timeout-ms 900000]"
+    "  openpond sandbox published-snapshot-build-watch <buildId> [--interval-ms 5000] [--timeout-ms 900000]"
   );
   console.log(
     "  openpond sandbox replay-start --team-id <id> --snapshot-id <id> [--entrypoint <name>] [--params <json>] [--artifact-paths <csv>]"
@@ -167,7 +232,7 @@ export function printHelp(): void {
     "  openpond sandbox costs [--team-id <id>] [--project-id <id>] [--agent-id <id>] [--summary]"
   );
   console.log(
-    "  openpond sandbox template-launch [--snapshot-id <id>|--template-name <name>|--use-case <id>] [--version <v>] [--team-id <id>] [--budget-usd 0.05]"
+    "  openpond sandbox run-published-snapshot [--snapshot-id <id>|--name <name>|--use-case <id>] [--version <v>] [--team-id <id>] [--budget-usd 0.05]"
   );
   console.log(
     "  openpond sandbox snapshot-fork <snapshotId> [--team-id <id>] [--project-id <id>] [--budget-usd 0.05]"
@@ -180,17 +245,27 @@ export function printHelp(): void {
   );
   console.log("  openpond sandbox snapshot-publish <sandboxId> <snapshotId>");
   console.log(
-    "  openpond sandbox create [--repo <url>] [--budget-usd 0.05] [--env-ref NAME=openpond://secret/...] [--env-literal NAME=value] [--project-id <id>] [--agent-id <id>] [--runtime-mode feature --runtime-project-id <projectId> --runtime-base-branch master]"
+    "  openpond sandbox create [--repo <url>] [--image python:3.12-slim-bookworm | --dockerfile Dockerfile] [--budget-usd 0.05] [--env-ref NAME=openpond://secret/...] [--env-literal NAME=value] [--project-id <id>] [--agent-id <id>] [--runtime-profile-id openpond-coding-core-v1] [--workflow-mode feature --runtime-project-id <projectId> --runtime-base-branch master]"
   );
   console.log(
-    "    example: openpond sandbox create --runtime-mode feature --runtime-project-id project_123 --runtime-base-branch master"
+    "    example: openpond sandbox create --runtime-profile-id openpond-coding-core-v1 --workflow-mode feature --runtime-project-id project_123 --runtime-base-branch master"
+  );
+  console.log(
+    "    example: openpond sandbox create --image python:3.12-slim-bookworm --command 'python --version'"
+  );
+  console.log(
+    "    example: openpond sandbox create --dockerfile Dockerfile --dockerfile-context . --docker-build-args '{\"NODE_VERSION\":\"20\"}'"
   );
   console.log('  openpond sandbox exec <sandboxId> --command "bun test"');
   console.log(
     "  openpond sandbox port <sandboxId> --port 4173 [--access private|public] [--auto-start] [--domain app.example.com] [--auth-token <token>|--auth-header <name> --auth-header-value <value>]"
   );
-  console.log("  openpond sandbox stop <sandboxId>");
-  console.log("  openpond sandbox delete <sandboxId>");
+  console.log(
+    "  openpond sandbox stop <sandboxId> [--fail-on-unpreserved-changes]"
+  );
+  console.log(
+    "  openpond sandbox delete <sandboxId> [--fail-on-unpreserved-changes]"
+  );
   console.log("  openpond sandbox receipts <sandboxId>");
   console.log("  openpond sandbox logs <sandboxId>");
   console.log("  openpond sandbox billing <sandboxId>");
@@ -244,6 +319,9 @@ export function printHelp(): void {
   console.log("  openpond sandbox git-status <sandboxId>");
   console.log("  openpond sandbox git-diff <sandboxId> [--base-ref <ref>]");
   console.log(
+    "  openpond sandbox git-export-patch <sandboxId> [--base-ref <ref>]"
+  );
+  console.log(
     "  openpond sandbox git-branch <sandboxId> --branch <name> [--create] [--start-point <ref>]"
   );
   console.log(
@@ -256,7 +334,18 @@ export function printHelp(): void {
     "  openpond sandbox git-push <sandboxId> [--remote origin] [--branch main] [--set-upstream] [--force-with-lease]"
   );
   console.log(
+    "  openpond sandbox runtime-preserve-source <runtimeId> [--team-id <id>] [--sandbox-id <id>] [--message <text>]"
+  );
+  console.log(
     "  openpond sandbox smoke --env staging [--account <profile>] [--keep]"
+  );
+  console.log("  openpond opchat models [--env staging]");
+  console.log("  openpond opchat model <model> [--env staging]");
+  console.log(
+    "  openpond opchat chat [--env staging] [--model openpond-chat] [--message <text>] [--stream]"
+  );
+  console.log(
+    "  openpond opchat smoke [--env staging] [--skip-stream] [--skip-tool] [--json]"
   );
   console.log("  openpond apps list [--handle <handle>] [--refresh] [--json]");
   console.log(
@@ -296,12 +385,13 @@ export function printHelp(): void {
   console.log(
     "  --chat-api-base-url <url> (hosted chat/model endpoint for this profile)"
   );
+  console.log("  --opchat-api-base-url <url> (OpChat /opchat/v1 endpoint)");
   console.log(
     "  --sandbox-api-url <url> (exact /v1/sandboxes or /api/sandboxes endpoint)"
   );
   console.log("");
   console.log("Env:");
   console.log(
-    "  OPENPOND_API_KEY, OPENPOND_ACCOUNT, OPENPOND_BASE_URL, OPENPOND_API_URL, OPENPOND_CHAT_API_URL, OPENPOND_TOOL_URL, OPENPOND_SANDBOX_BASE_URL, OPENPOND_SANDBOX_API_URL"
+    "  OPENPOND_API_KEY, OPENPOND_ACCOUNT, OPENPOND_BASE_URL, OPENPOND_API_URL, OPENPOND_OPCHAT_API_URL, OPENPOND_CHAT_API_URL, OPENPOND_TOOL_URL, OPENPOND_SANDBOX_BASE_URL, OPENPOND_SANDBOX_API_URL"
   );
 }
